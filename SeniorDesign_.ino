@@ -5,6 +5,17 @@
 static const int RXPin = 5, TXPin = 3;
 static const uint32_t GPSBaud = 9600;
 
+static const uint32_t destLat = 30.418080;
+static const uint32_t destLong = -91.1679;
+
+static const float dummyLat = 31.30000;
+static const float dummyLong = -90.2490;
+static const uint32_t dummyCourse = 180; 
+
+float currentLat; 
+float currentLong;
+uint32_t currentCourse; 
+
 TinyGPSPlus gps;
 Servo servo;
 SoftwareSerial ss(RXPin, TXPin);
@@ -43,11 +54,30 @@ void displayInfo()
     Serial.print(gps.location.lat(), 6);
     Serial.print(F(","));
     Serial.print(gps.location.lng(), 6);
+    currentLat = gps.location.lat();
+    currentLong = gps.location.lng();
+    }
+  else
+  {
+    Serial.print(F("INVALID "));
+    currentLat=dummyLat; 
+    currentLong=dummyLong;
+    Serial.print(currentLat);
+    Serial.print(F(" ,"));
+    Serial.print(currentLong);
+   }
+
+  Serial.print(F(" Course: "));
+  if (gps.course.isValid())
+  {
+    Serial.print(gps.course.deg(), 6); 
+    Serial.print(F(","));  
+    currentCourse=gps.course.deg();
   }
   else
   {
     Serial.print(F("INVALID"));
-    
+    currentCourse=dummyCourse;  
   }
   
   Serial.print(F("  Date/Time: "));
@@ -83,9 +113,10 @@ void displayInfo()
   {
     Serial.print(F("INVALID"));
   }
+    
     Serial.end();
     ss.end();
-    servo.write(0);
+    servo.write(90);
     delay(1000);
     servo.detach();
     Serial.begin(115200);

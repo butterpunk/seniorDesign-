@@ -1,16 +1,19 @@
 #include <TinyGPS++.h>
 #include <SoftwareSerial.h>
 #include <Servo.h>
+#include <math.h> //math library...?
+#include <stdio.h>
+#include <wire.h>
 
 static const int RXPin = 5, TXPin = 3;
 static const uint32_t GPSBaud = 9600;
 
-static const uint32_t destLat = 30.418080;
-static const uint32_t destLong = -91.1679;
+double destLat;
+double destLong;
 
-static const float dummyLat = 31.30000;
-static const float dummyLong = -90.2490;
-static const uint32_t dummyCourse = 180; 
+static const double dummyLat = 31.19000;
+static const double dummyLong = -91.2490;
+static const uint32_t dummyCourse = 360; 
 
 float currentLat; 
 float currentLong;
@@ -22,18 +25,25 @@ SoftwareSerial ss(RXPin, TXPin);
 
 void setup()
 {
-  Serial.begin(115200);
-  ss.begin(GPSBaud);
+  Serial.begin(115200); //Serial timer for console output and Servo
+  ss.begin(GPSBaud);    //Serial for GPS 
 
-  servo.attach(9);
+  destLong = -91.1679;
+  destLat = 30.500080;
+
+  servo.attach(9);      //Servo is on wire 9 
 
   Serial.println(F("Senior Design GPS/servo configuration"));
   Serial.println(F("By: Blake Butterworth"));
-
 }
 
 void loop()
 {
+  //Receive data from arduino mega
+  Wire.begin(9); 
+  Wire.onReceive(receiveEvent);
+  
+  
   // This sketch displays information every time a new sentence is correctly encoded.
   while (ss.available() > 0)
     if (gps.encode(ss.read()))
@@ -45,6 +55,13 @@ void loop()
     while(true);
   }
 }
+
+void receiveEvent(recievebyte){
+  dest = wire.read();
+  //dest lat 
+  
+}
+
 
 void displayInfo()
 {
@@ -113,13 +130,20 @@ void displayInfo()
   {
     Serial.print(F("INVALID"));
   }
+    servoMove();
+ 
+  Serial.println();
+}
+void servoMove(){
     
+    float courseChange=atan2(sin(currentLong)*cos(currentCourse),
+    cos(destLat)*sin(destLat)-sin(currentLat)*cos(destLat)*cos(currentCourse)); //azimuth equation
     Serial.end();
     ss.end();
-    servo.write(90);
+    servo.write(courseChange);
     delay(1000);
     servo.detach();
     Serial.begin(115200);
-    ss.begin(GPSBaud); 
-  Serial.println();
-}
+    ss.begin(GPSBaud);
+  
+  }

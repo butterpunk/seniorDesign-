@@ -2,9 +2,6 @@
 This is intended to be the code for the Arduino Mega for our 
 project. 
 
-This is the first version, supporting GET and POST HTTP requests and the temperature sensor.
-The temp sensor code was adapated from the code here:
-http://www.hacktronics.com/Tutorials/arduino-1-wire-tutorial.html
 */
 #include <SoftwareSerial.h>
 #include <OneWire.h>
@@ -12,6 +9,7 @@ http://www.hacktronics.com/Tutorials/arduino-1-wire-tutorial.html
 
 #define rxPin 10
 #define txPin 11
+
 #define STATPIN 9
 #define PWKPIN 7
 #define TEMPPIN 4
@@ -20,8 +18,16 @@ OneWire oneWire(TEMPPIN);
 DallasTemperature sensors(&oneWire);
 DeviceAddress ourThermometer = {0x28, 0x09, 0x25, 0x50, 0x06, 0x00, 0x00, 0xAB };
 
-String GETURL = "http://stumpthumpers.comuv.com/get.php?msg=";
-String POSTURL= "http://stumpthumpers.comuv.com/datapost.php";
+String GETURL = "http://stumpthumpers.comuv.com/tx.php";
+String POSTURL = GETURL;
+String READURL = "http://stumpthumpers.comuv.com/destination.php";
+
+//Current lat and long
+//The defined values are dummy values to be used for the purpose of testing the sending of GPS coordinates.
+//double GPSlat_present = 31.12345678;
+//double GPSlong_present = -91.12345678;
+String GPSlat_present = "31.12345678";
+String GPSlong_present = "-91.12345678";
 
 SoftwareSerial mySerial(rxPin,txPin); // RX, TX
 
@@ -43,15 +49,17 @@ void setup() {
 }
 
 void loop() {
-  delay(2000);
-  //sendGET("autotest");
-  //sendPOST("autotest2");
+  delay(500);
+  /*
   Serial.print(getTemperature(ourThermometer));
   String tempSend = String(getTemperature(ourThermometer));
   Serial.print(tempSend);
   const char * tempSendp = tempSend.c_str();
-  sendGET(tempSendp);
+  */
+  //sendRead();
   
+  issueCommand2("AT","OK");
+  issueCommand2("ATI","OK");
   delay(500);
   while(true)
     {
@@ -59,52 +67,6 @@ void loop() {
     }
 }
 
-void sendGET(const char* msg) {
-  String result = GETURL + msg;
-  int resultSize = result.length();
-  String urlline = "AT+QHTTPURL=" + String(resultSize) + ",30";
-  const char * urlp = urlline.c_str();
-  const char * resultp = result.c_str();
-  issueCommand("AT+QIFGCNT=0");
-  issueCommand("AT+QIDNSIP=1");
-  issueCommand("AT+QICSGP=1,\"truphone.com\",\"\",\"\"");  //Set the APN
-  //issueCommand("AT+QIREGAPP");  //Optional
-  //issueCommand("AT+QIACT");     //Optional
-  
-  issueCommand(urlp);
-  issueCommand(resultp);
-  issueCommand("AT+QHTTPGET=60");
-  //issueCommand("AT+QHTTPREAD=30");
-  
-}
-
-void sendPOST(char* msg) {
-  //AT+QHTTPPOST=18,50,10 
-  String result = POSTURL;
-  String data = msg;
-  int resultSize = result.length();
-  String urlline = "AT+QHTTPURL=" + String(resultSize) + ",30";
-  String dataToSend = "msg=" + data;
-  String postline= "AT+QHTTPPOST=" + String(dataToSend.length()) + ",50,10";
-  const char * urlp = urlline.c_str();
-  const char * resultp = result.c_str();
-  const char * postlinep = postline.c_str();
-  const char * d2sp = dataToSend.c_str();
-  
-  issueCommand("AT+QIFGCNT=0");
-  issueCommand("AT+QIDNSIP=1");
-  issueCommand("AT+QICSGP=1,\"truphone.com\",\"\",\"\"");  //Set the APN
-  //issueCommand("AT+QIREGAPP");  //Optional
-  //issueCommand("AT+QIACT");     //Optional
-  
-  issueCommand(urlp);
-  issueCommand(resultp);
-  issueCommand(postlinep);
-  delay(1000);
-  issueCommand(d2sp);
-  //issueCommand("AT+QHTTPREAD=30");
-  
-}
 
 void issueCommand(const char* msg) {
   mySerial.println(msg);
@@ -113,8 +75,64 @@ void issueCommand(const char* msg) {
   delay(500);
 }
 
+void issueCommand2(const char* msg, const char* resp) {
+  String checkFor = resp;
+  int checkForLength = checkFor.length();
+  char output[checkForLength];
+  String outStr;
+  int i = checkForLength - 1;
+  byte in_b;
+  
+  if (checkForLength <= 1)
+  {
+    mySerial.println(msg); 
+    delay(500);
+    readResponse();
+    delay(500);
+  }
+  else
+  {
+    mySerial.println(msg); 
+    delay(500);
+    while (mySerial.available()) {
+       in_b = mySerial.read();
+       Serial.write(in_b);
+       if (in_b != 0 && in_b != '\n' && in_b != '\r' && in_b !='\n\r' && in_b != '\r\n')
+       {
+          if (i > 1)
+          {
+          for(int k=1; k < i; k++)
+            {
+              output[k-1] = output[k];
+            }
+          output[i] = in_b;
+          }else
+          {
+            output[0] = output[1];
+            output[1] = in_b;
+          }
+       }
+       delay(10); 
+    }
+    String test;
+    for (int k=0; k < checkForLength; k++)
+      {
+        test = test + String(output[k]);
+      }
+    Serial.println("Output: " + test);
+    if (test == checkFor)
+      {
+       Serial.println("ayy"); 
+      }
+}
+}
+
 void readResponse() {
   while (mySerial.available()){
+    if (mySerial.available() >= 64)
+      {
+        Serial.println("Overflooooow");
+      }
     Serial.write(mySerial.read());
     delay(10);
   }
@@ -124,9 +142,113 @@ float getTemperature(DeviceAddress deviceAddress)
 {
   
   float tempC = sensors.getTempC(deviceAddress);
+  delay(100);
+  float tempC2 = sensors.getTempC(deviceAddress);
+  if (tempC2 != tempC)
+    {
+      delay(300);
+      tempC = sensors.getTempC(deviceAddress);
+    }
   if (tempC == -127.00){
   //Serial.print("Error getting Temperature.");
   tempC = -999.99;
   }
   return tempC;
+}
+
+/*
+Sends an HTTP GET request to the website. The url for the form is defined by GETURL
+The final url to be used will be:
+GETURL?tmp=TEMPVALUE&lat=LATVALUE&long=LONGVALUE
+The TEMPVALUE is obtained within the function. The current GPS Coordinates are stored in 
+the global variables, GPSlat_present and GPSlong_present
+
+result is the url to be supplied to the Quectel M95 after sending the AT+QHTTPURL=n,m command where n is the size (in bytes) of result
+resultInfop is the pointer that points to the string/char array of the AT+QHTTPURL command and resultp is the pointer for result.
+
+*/
+void sendGet() {
+  //Create the URL to send the HTTP GET request to.
+  String result = GETURL + "?tmp=" + String(getTemperature(ourThermometer)) + "&lat=" + GPSlat_present + "&long=" + GPSlong_present;
+  //Prepare the AT command that declares the amount of bytes of the url to send the request to and the max time to send (in seconds)
+  String resultInfo = "AT+QHTTPURL=" + String(result.length()) + ",30";
+  //Convert the two above strings to const char *, which is what the issueCommand function requires
+  const char * resultp = result.c_str();
+  const char * resultInfop = resultInfo.c_str();
+  
+  //Issue the AT commands
+  issueCommand("AT+QIFGCNT=0");
+  issueCommand("AT+QIDNSIP=1");
+  issueCommand("AT+QICSGP=1,\"truphone.com\",\"\",\"\""); //Set the APN
+  
+  issueCommand(resultInfop);
+  issueCommand(resultp);
+  issueCommand("AT+QHTTPGET=60");
+  delay(5000);
+  issueCommand("AT+QHTTPREAD=30");  //Send the read request. Not currently in use.  
+  delay(2000);
+  issueCommand("AT+QIDEACT");
+  
+}
+
+/*
+Sends an HTTP POST request to the website. The url for the form is defined by POSTURL. (Which is currently the same as GETURL
+The TEMPVALUE is obtained within the function (like with sendGet(), using getTemperature)
+Lat and Long are saved within the global variables.
+
+result is the url to be supplied to AT+QHTTPURL=n,m where n is the size (in bytes) of result
+
+*/
+void sendPost() {
+  String result = POSTURL;  
+  String resultInfo = "AT+QHTTPURL=" + String(result.length()) + ",30";
+   String dataToSend = "msg=" + String(getTemperature(ourThermometer));
+  dataToSend = dataToSend + "||" + String(GPSlat_present);
+  dataToSend = dataToSend + "||" + String(GPSlong_present);
+  
+  String postInfo = "AT+QHTTPPOST=" + String(dataToSend.length()) + ",50,10";
+  
+  //Convert the above strings to const char *, which is what the issueCommand function requires
+  const char * resultp = result.c_str();
+  const char * resultInfop = resultInfo.c_str();
+  const char * dataToSendp = dataToSend.c_str();
+  const char * postInfop = postInfo.c_str();
+
+  //Issue the AT commands  
+  issueCommand("AT+QIFGCNT=0");
+  issueCommand("AT+QIDNSIP=1");
+  issueCommand("AT+QICSGP=1,\"truphone.com\",\"\",\"\""); //Set the APN
+  issueCommand(resultInfop);
+  issueCommand(resultp);
+  issueCommand(postInfop);
+  delay(1000);
+  issueCommand(dataToSendp);
+  delay(3000);
+  issueCommand("AT+QHTTPREAD=30"); //Send the read request. Not currently in use. 
+  issueCommand("AT+QIDEACT");
+  
+}
+
+void sendRead() {
+  //Create the URL to send the HTTP GET request to.
+  String result = READURL;
+  //Prepare the AT command that declares the amount of bytes of the url to send the request to and the max time to send (in seconds)
+  String resultInfo = "AT+QHTTPURL=" + String(result.length()) + ",30";
+  //Convert the two above strings to const char *, which is what the issueCommand function requires
+  const char * resultp = result.c_str();
+  const char * resultInfop = resultInfo.c_str();
+  
+  //Issue the AT commands
+  issueCommand("AT+QIFGCNT=0");
+  issueCommand("AT+QIDNSIP=1");
+  issueCommand("AT+QICSGP=1,\"truphone.com\",\"\",\"\""); //Set the APN
+  
+  issueCommand(resultInfop);
+  issueCommand(resultp);
+  issueCommand("AT+QHTTPGET=60");
+  delay(2000);
+  issueCommand("AT+QHTTPREAD=30");  //Send the read request. Not currently in use.  
+  delay(10000);
+  issueCommand("AT+QIDEACT");
+   
 }

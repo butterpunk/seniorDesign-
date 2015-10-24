@@ -1,0 +1,132 @@
+/* 
+This is intended to be the code for the Arduino Mega for our 
+project. 
+
+This is the first version, supporting GET and POST HTTP requests and the temperature sensor.
+The temp sensor code was adapated from the code here:
+http://www.hacktronics.com/Tutorials/arduino-1-wire-tutorial.html
+*/
+#include <SoftwareSerial.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
+#define rxPin 10
+#define txPin 11
+#define STATPIN 9
+#define PWKPIN 7
+#define TEMPPIN 4
+
+OneWire oneWire(TEMPPIN);
+DallasTemperature sensors(&oneWire);
+DeviceAddress ourThermometer = {0x28, 0x09, 0x25, 0x50, 0x06, 0x00, 0x00, 0xAB };
+
+String GETURL = "http://stumpthumpers.comuv.com/get.php?msg=";
+String POSTURL= "http://stumpthumpers.comuv.com/datapost.php";
+
+SoftwareSerial mySerial(rxPin,txPin); // RX, TX
+
+void setup() {
+  // put your setup code here, to run once:
+  pinMode(rxPin, INPUT);
+  pinMode(txPin, OUTPUT);
+  
+  Serial.begin(9600);
+  //Serial.println("Arduino serial initialized!");
+  delay(10);
+
+  mySerial.begin(9600);
+  //Serial.println("Software serial initialized!");
+  delay(10);
+  
+  sensors.begin();
+  sensors.setResolution(ourThermometer, 10);
+}
+
+void loop() {
+  delay(2000);
+  //sendGET("autotest");
+  //sendPOST("autotest2");
+  Serial.print(getTemperature(ourThermometer));
+  String tempSend = String(getTemperature(ourThermometer));
+  Serial.print(tempSend);
+  const char * tempSendp = tempSend.c_str();
+  sendGET(tempSendp);
+  
+  delay(500);
+  while(true)
+    {
+      readResponse();
+    }
+}
+
+void sendGET(const char* msg) {
+  String result = GETURL + msg;
+  int resultSize = result.length();
+  String urlline = "AT+QHTTPURL=" + String(resultSize) + ",30";
+  const char * urlp = urlline.c_str();
+  const char * resultp = result.c_str();
+  issueCommand("AT+QIFGCNT=0");
+  issueCommand("AT+QIDNSIP=1");
+  issueCommand("AT+QICSGP=1,\"truphone.com\",\"\",\"\"");  //Set the APN
+  //issueCommand("AT+QIREGAPP");  //Optional
+  //issueCommand("AT+QIACT");     //Optional
+  
+  issueCommand(urlp);
+  issueCommand(resultp);
+  issueCommand("AT+QHTTPGET=60");
+  //issueCommand("AT+QHTTPREAD=30");
+  
+}
+
+void sendPOST(char* msg) {
+  //AT+QHTTPPOST=18,50,10 
+  String result = POSTURL;
+  String data = msg;
+  int resultSize = result.length();
+  String urlline = "AT+QHTTPURL=" + String(resultSize) + ",30";
+  String dataToSend = "msg=" + data;
+  String postline= "AT+QHTTPPOST=" + String(dataToSend.length()) + ",50,10";
+  const char * urlp = urlline.c_str();
+  const char * resultp = result.c_str();
+  const char * postlinep = postline.c_str();
+  const char * d2sp = dataToSend.c_str();
+  
+  issueCommand("AT+QIFGCNT=0");
+  issueCommand("AT+QIDNSIP=1");
+  issueCommand("AT+QICSGP=1,\"truphone.com\",\"\",\"\"");  //Set the APN
+  //issueCommand("AT+QIREGAPP");  //Optional
+  //issueCommand("AT+QIACT");     //Optional
+  
+  issueCommand(urlp);
+  issueCommand(resultp);
+  issueCommand(postlinep);
+  delay(1000);
+  issueCommand(d2sp);
+  //issueCommand("AT+QHTTPREAD=30");
+  
+}
+
+void issueCommand(const char* msg) {
+  mySerial.println(msg);
+  delay(500);
+  readResponse();
+  delay(500);
+}
+
+void readResponse() {
+  while (mySerial.available()){
+    Serial.write(mySerial.read());
+    delay(10);
+  }
+}
+
+float getTemperature(DeviceAddress deviceAddress)
+{
+  
+  float tempC = sensors.getTempC(deviceAddress);
+  if (tempC == -127.00){
+  //Serial.print("Error getting Temperature.");
+  tempC = -999.99;
+  }
+  return tempC;
+}

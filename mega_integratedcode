@@ -24,12 +24,16 @@ String READURL = "http://stumpthumpers.comuv.com/destination.php";
 
 //Current lat and long
 //The defined values are dummy values to be used for the purpose of testing the sending of GPS coordinates.
-//double GPSlat_present = 31.12345678;
-//double GPSlong_present = -91.12345678;
 String GPSlat_present = "31.12345678";
 String GPSlong_present = "-91.12345678";
+String GPSlat_target = GPSlat_present;
+String GPSlong_target = GPSlong_present;
 
 SoftwareSerial mySerial(rxPin,txPin); // RX, TX
+
+long startTime;
+long durationTime = 3000;
+long currentTime;
 
 void setup() {
   // put your setup code here, to run once:
@@ -50,16 +54,15 @@ void setup() {
 
 void loop() {
   delay(500);
-  /*
-  Serial.print(getTemperature(ourThermometer));
-  String tempSend = String(getTemperature(ourThermometer));
-  Serial.print(tempSend);
-  const char * tempSendp = tempSend.c_str();
-  */
-  //sendRead();
   
-  issueCommand2("AT","OK");
-  issueCommand2("ATI","OK");
+  //Serial.print(getTemperature(ourThermometer));
+  //String tempSend = String(getTemperature(ourThermometer));
+  //Serial.print(tempSend);
+  //const char * tempSendp = tempSend.c_str();
+  
+  
+  sendRead();
+  //sendPost();
   delay(500);
   while(true)
     {
@@ -67,6 +70,19 @@ void loop() {
     }
 }
 
+String issueAndSave(const char* msg) {
+   String out = "";
+   char in_c;
+   mySerial.println(msg);
+   delay(500);
+   while (mySerial.available()){
+    in_c = mySerial.read();
+    Serial.write(in_c);
+    out = out + String(in_c);
+    delay(10);
+  }
+  return out;
+}
 
 void issueCommand(const char* msg) {
   mySerial.println(msg);
@@ -82,9 +98,14 @@ void issueCommand2(const char* msg, const char* resp) {
   String outStr;
   int i = checkForLength - 1;
   byte in_b;
-  
+  boolean canGo = false;
+  boolean sentData = false;
+  startTime = millis();
+  while (canGo == false)
+  {
   if (checkForLength <= 1)
   {
+    canGo = true;
     mySerial.println(msg); 
     delay(500);
     readResponse();
@@ -92,7 +113,12 @@ void issueCommand2(const char* msg, const char* resp) {
   }
   else
   {
-    mySerial.println(msg); 
+    if (sentData == false)
+      {
+        sentData = true;
+        mySerial.println(msg);
+        //canGo = true;  //Don't want to just endlessly just resend the command. Give up after three attempts.
+      }
     delay(500);
     while (mySerial.available()) {
        in_b = mySerial.read();
@@ -119,12 +145,20 @@ void issueCommand2(const char* msg, const char* resp) {
       {
         test = test + String(output[k]);
       }
-    Serial.println("Output: " + test);
+    //Serial.println("Output: " + test);
     if (test == checkFor)
       {
-       Serial.println("ayy"); 
+       canGo = true;
       }
-}
+ 
+    if (millis() > startTime + durationTime)
+      {
+        //Time's up
+        canGo = true;
+      }
+ }
+ 
+ }
 }
 
 void readResponse() {
@@ -183,8 +217,8 @@ void sendGet() {
   
   issueCommand(resultInfop);
   issueCommand(resultp);
-  issueCommand("AT+QHTTPGET=60");
-  delay(5000);
+  issueCommand2("AT+QHTTPGET=60","OK");
+  //delay(5000);
   issueCommand("AT+QHTTPREAD=30");  //Send the read request. Not currently in use.  
   delay(2000);
   issueCommand("AT+QIDEACT");
@@ -220,10 +254,10 @@ void sendPost() {
   issueCommand("AT+QICSGP=1,\"truphone.com\",\"\",\"\""); //Set the APN
   issueCommand(resultInfop);
   issueCommand(resultp);
-  issueCommand(postInfop);
-  delay(1000);
-  issueCommand(dataToSendp);
-  delay(3000);
+  issueCommand2(postInfop,"CONNECT");
+  //delay(1000);
+  issueCommand2(dataToSendp,"OK");
+  //delay(3000);
   issueCommand("AT+QHTTPREAD=30"); //Send the read request. Not currently in use. 
   issueCommand("AT+QIDEACT");
   
@@ -238,6 +272,13 @@ void sendRead() {
   const char * resultp = result.c_str();
   const char * resultInfop = resultInfo.c_str();
   
+  String output;
+  //char outChar[ ];
+  boolean gettingLL = false;
+  boolean writingLat = false;
+  int leftPoint = 0;
+  int rightPoint = 0;
+  
   //Issue the AT commands
   issueCommand("AT+QIFGCNT=0");
   issueCommand("AT+QIDNSIP=1");
@@ -245,10 +286,22 @@ void sendRead() {
   
   issueCommand(resultInfop);
   issueCommand(resultp);
-  issueCommand("AT+QHTTPGET=60");
-  delay(2000);
-  issueCommand("AT+QHTTPREAD=30");  //Send the read request. Not currently in use.  
-  delay(10000);
+  issueCommand2("AT+QHTTPGET=60","OK");
+  output = issueAndSave("AT+QHTTPREAD=30");  //Send the read request. Not currently in use.  
+  leftPoint = output.indexOf('[');
+  rightPoint = output.indexOf(']', leftPoint + 1);
+  //Serial.println("Left Point: " + String(leftPoint) + ", Right Point: " + String(rightPoint));
+  if (leftPoint != rightPoint && rightPoint > leftPoint)
+    {
+    output = output.substring(leftPoint+1,rightPoint);
+    //Serial.println(output);
+    leftPoint = output.indexOf(',');    // Is now a middle point
+    GPSlat_target = output.substring(0,leftPoint);
+    GPSlong_target= output.substring(leftPoint+1, output.length());
+    }
+  Serial.println("GPS Lat Target Position: " + GPSlat_target);
+  Serial.println("GPS Long Target Position: " + GPSlong_target);
+  delay(5000);
   issueCommand("AT+QIDEACT");
    
 }

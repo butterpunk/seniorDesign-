@@ -1,7 +1,9 @@
 /* 
 This is intended to be the code for the Arduino Mega for our 
 project. 
-Version: 0.9 11/2/15
+Version 0.91
+11/2/2015
+Latest Version: Send Should work and do so at a sampling frequency for a specified amount of samples.
 */
 #include <SoftwareSerial.h>
 #include <OneWire.h>
@@ -15,6 +17,9 @@ Version: 0.9 11/2/15
 #define PWKPIN 7
 #define TEMPPIN 4
 
+#define SAMPLING_NUMBER 2
+#define SAMPLING_PERIOD 5  //Seconds between samples. 
+
 OneWire oneWire(TEMPPIN);
 DallasTemperature sensors(&oneWire);
 DeviceAddress ourThermometer = {0x28, 0x09, 0x25, 0x50, 0x06, 0x00, 0x00, 0xAB };
@@ -25,12 +30,10 @@ String READURL = "http://stumpthumpers.comuv.com/destination.php";
 
 //Current lat and long
 //The defined values are dummy values to be used for the purpose of testing the sending of GPS coordinates.
-//String GPSlat_present = "31.123456";
-//String GPSlong_present = "-91.123456";
-String GPSlat_present = "69.696969";
-String GPSlong_present = "-69.696969";
-String GPSlat_target = GPSlat_present;
-String GPSlong_target = GPSlong_present;
+String GPSlat_present = "31.123456";
+String GPSlong_present = "-91.123456";
+String GPSlat_target = "";
+String GPSlong_target = "";
 
 SoftwareSerial mySerial(rxPin,txPin); // RX, TX
 
@@ -44,7 +47,9 @@ boolean flag_cmd = false;
 //boolean flag_txUno = true;
 //boolean flag_rxUno = true;
 boolean flag_unoPresent = false;
+boolean flag_targetChange = false;
 
+int samplesTaken = 0;
 
 void setup() {
   // put your setup code here, to run once:
@@ -73,6 +78,7 @@ void loop() {
   setupModem();
   
   //Execute a read to get the target location
+  Serial.println("READ WEBSITE");
   //sendRead();
   GPSlat_target = "31.1900";
   GPSlong_target = "-91.4490";
@@ -83,21 +89,30 @@ void loop() {
   delay(1000);
   while(true)
     {
-      Serial.println("Requesting from Uno ...");
+      Serial.println("REQUESTING FROM UNO");
       checkSlave(8, true);
       requestToUno(8,23);
       //Interpret result
       //Update flag_going
       if (flag_there == true)
         {
-          Serial.println("No longer going ...");
-          //Send Sample
-          //sendPost();
-          Serial.println("Send data ... ");
-          //See if there's a new destination
+          Serial.println("AT THE LOCATION");
+          //Send Samples
+          if (samplesTaken == 0)
+            {
+              
+              for (int k=0; k<SAMPLING_NUMBER; k++)
+                {
+                  Serial.println("SENDING SAMPLE " + String(k));
+                  //sendPost();
+                  delay(SAMPLING_PERIOD*1000);  //Wait sampling period.
+                }
+                Serial.println("SAMPLES SENT");
+            }
+          
+          Serial.println("READING ... ");
+          //flag_targetChange is updated by sendRead if the read gps location is new
           //sendRead();
-          Serial.println("See if website has changed ...");
-          flag_there = false;
         }
       readResponse();
       delay(500);
@@ -300,6 +315,7 @@ void sendPost() {
 void sendRead() {
   //Create the URL to send the HTTP GET request to.
   String result = READURL;
+  String result2;
   //Prepare the AT command that declares the amount of bytes of the url to send the request to and the max time to send (in seconds)
   String resultInfo = "AT+QHTTPURL=" + String(result.length()) + ",30";
   //Convert the two above strings to const char *, which is what the issueCommand function requires
@@ -328,8 +344,22 @@ void sendRead() {
     {
     output = output.substring(leftPoint+1,rightPoint);
     leftPoint = output.indexOf(',');    // Is now a middle point
-    GPSlat_target = output.substring(0,leftPoint);
-    GPSlong_target= output.substring(leftPoint+1, output.length());
+    result = output.substring(0,leftPoint);
+    result2 = output.substring(leftPoint+1, output.length());
+    if (result.equals(GPSlat_target) && result2.equals(GPSlong_target))
+      {
+        //No change to the target location
+        flag_targetChange = false;
+      }
+    else 
+      {
+        //There's been a change to the target location
+        GPSlat_target = result;
+        GPSlong_target= result2;
+        flag_targetChange = true;
+        samplesTaken = 0; // Reset the samples taken so we can take more at the new location.
+        Serial.println("TARGET LOCATION CHANGED: samplesTaken = 0");
+      }
     }
   delay(5000);
   issueCommand2("AT+QIDEACT","DEACT OK");
@@ -351,8 +381,12 @@ void setupTemp() {
   float tempC = getTemperature(ourThermometer);
   delay(500);
   float tempC2 = getTemperature(ourThermometer);
-  while (tempC2 != tempC)
+  //85 degrees C is the value after booting up. Can also occur
+  //if there's a power issue (i.e., not enough to temp)
+  while (tempC2 != tempC || tempC2 == 85)
    {
+     if (tempC2 == 85)
+       Serial.println("85 C. Possible power issue.");
      tempC2 = getTemperature(ourThermometer);
      delay(500);
    } 
@@ -414,7 +448,6 @@ void requestToUno(int a, int b) {
   boolean printCheck = false;
   String output, output_piece;
   int flag1, flag2, flag3, flag4, flag5;
-  String lat1, long2;
   Wire.requestFrom(a,b);
   while (Wire.available() > 1) {
     char c = Wire.read();
@@ -439,7 +472,5 @@ void requestToUno(int a, int b) {
         GPSlong_present = output.substring(output.lastIndexOf(',')+1, output.length());
         //output_piece = output.substring(0,output.indexOf(','));
         Serial.println("Flag Received: " + String(flag1) + ", " + String(flag2) + ", " + String(flag3) + ", " + String(flag4) + ", " + String(flag5));
-        //Serial.println("Lat Received: " + lat1);
-        //Serial.println("Long Received: " + lat2);
     }
 }

@@ -1,9 +1,9 @@
 /* 
 This is intended to be the code for the Arduino Mega for our 
 project. 
-Version 0.91
-11/2/2015
-Latest Version: Send Should work and do so at a sampling frequency for a specified amount of samples.
+Version 0.92
+11/3/2015
+Latest Version: Sampling Number and Period tested and work. Logic works. 1 Min Delay between Reads while at location works (and is adjustable).
 */
 #include <SoftwareSerial.h>
 #include <OneWire.h>
@@ -41,7 +41,10 @@ long startTime;
 long durationTime = 3000;
 long currentTime;
 
-boolean flag_there = true;
+long startTime_read;
+long durationTime_read = 60000; //in ms
+
+boolean flag_there = false;
 boolean data_sent = false;
 boolean flag_cmd = false;
 //boolean flag_txUno = true;
@@ -87,13 +90,14 @@ void loop() {
   Serial.println("Sending to Uno ... ");
   sendToUno(8);
   delay(1000);
+  startTime_read = millis();
   while(true)
     {
       Serial.println("REQUESTING FROM UNO");
       checkSlave(8, true);
       requestToUno(8,23);
       //Interpret result
-      //Update flag_going
+      //Update flag_there
       if (flag_there == true)
         {
           Serial.println("AT THE LOCATION");
@@ -105,14 +109,23 @@ void loop() {
                 {
                   Serial.println("SENDING SAMPLE " + String(k));
                   //sendPost();
-                  delay(SAMPLING_PERIOD*1000);  //Wait sampling period.
+                  samplesTaken++;
+                    if (k < SAMPLING_NUMBER-1)
+                      delay(SAMPLING_PERIOD*1000);  //Wait sampling period.
                 }
                 Serial.println("SAMPLES SENT");
+                startTime_read = millis();
             }
           
-          Serial.println("READING ... ");
+          //Serial.println("READING ... ");
           //flag_targetChange is updated by sendRead if the read gps location is new
-          //sendRead();
+          //set up timer so read only happens every n seconds
+          if (millis() > startTime_read + durationTime_read)
+            {
+              //sendRead();
+              startTime_read = millis();
+              Serial.println("READ CMD SENT");
+            }
         }
       readResponse();
       delay(500);
@@ -337,7 +350,7 @@ void sendRead() {
   issueCommand(resultInfop);
   issueCommand(resultp);
   issueCommand2("AT+QHTTPGET=60","OK");
-  output = issueAndSave("AT+QHTTPREAD=30");  //Send the read request. Not currently in use.  
+  output = issueAndSave("AT+QHTTPREAD=30");  //Send the read request.
   leftPoint = output.indexOf('[');
   rightPoint = output.indexOf(']', leftPoint + 1);
   if (leftPoint != rightPoint && rightPoint > leftPoint)
@@ -361,7 +374,7 @@ void sendRead() {
         Serial.println("TARGET LOCATION CHANGED: samplesTaken = 0");
       }
     }
-  delay(5000);
+  //delay(5000);
   issueCommand2("AT+QIDEACT","DEACT OK");
    
 }
@@ -471,6 +484,6 @@ void requestToUno(int a, int b) {
         GPSlat_present = output.substring(output.indexOf(',')+1,output.lastIndexOf(','));
         GPSlong_present = output.substring(output.lastIndexOf(',')+1, output.length());
         //output_piece = output.substring(0,output.indexOf(','));
-        Serial.println("Flag Received: " + String(flag1) + ", " + String(flag2) + ", " + String(flag3) + ", " + String(flag4) + ", " + String(flag5));
+        Serial.println("Flag Received: " + String(flag1) + ", " + String(flag2) + ", " + String(flag3) + ", " + String(flag4) + ", " + String(flag_there));
     }
 }

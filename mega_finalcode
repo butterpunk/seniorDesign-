@@ -1,0 +1,316 @@
+/*
+Integrated code for the Mega. Integrates the ESC, Servo, and GPS together.
+To-Do: Integrate I2C, Sonar and Compass with it.
+Version: 0.9
+Date: 11/8/2015
+*/
+
+#include <TinyGPS++.h>
+#include <SoftwareSerial.h>
+#include <Servo.h>
+#include <math.h> 
+#include <stdio.h>
+#include <Wire.h>
+#include <stdlib.h>
+
+//initial setups 
+int PIN_Serial1_Rx = 19;
+int PIN_Serial1_Tx = 18;
+static const uint32_t GPSBaud = 9600;
+
+//gps points 
+double dLat;
+double dLng;
+double cLat; 
+double cLng;
+uint32_t cCourse; 
+double deltaLat = 10;
+double deltaLng = 10; 
+
+//dummy points for current 
+double dummyLat;
+double dummyLong;
+static const uint32_t dummyCourse = 90; 
+
+//dummy points for destination
+double dummyDestLat = 31.3412;
+double dummyDestLong = -91.3412;
+
+
+//mega transmission stuff
+int x1 = 0;
+int x2 = 0;
+int x3 = 0;
+int isVal = 0; 
+int loc; 
+String outCom; 
+boolean communication; 
+
+// for parsing incoming transmission - doesn't have to be global
+int leftPoint; 
+int rightPoint;
+String out = "";
+String lat;
+String lng; 
+//hack to try and make my serial input work 
+//int tmpleftPoint; 
+//int tmprightPoint;
+//String tmpout = "";
+boolean dummySet = false;
+String tmplat;
+String tmplng; 
+
+//for servo 
+float angle;
+
+//for esc
+int PIN_SERVO = 5;
+int PIN_ESC = 7;
+int speed = 1600; 
+Servo servoEsc; 
+
+TinyGPSPlus gps;
+Servo servo;
+
+void setup()
+{
+  //starting the two serials 
+  Serial.begin(9600);  
+  Serial1.begin(9600);
+  servoEsc.attach(PIN_ESC);
+  servo.attach(PIN_SERVO);
+  while (!servo.attached()) {}
+  servo.write(angle);
+ 
+ // creating the wires for communication with mega 
+  communication = 0; 
+  Wire.begin(8);                
+  Wire.onReceive(receiveEvent); 
+  Wire.onRequest(requestEvent);
+
+  //ESC stuff
+
+  
+}
+
+void loop()
+{
+  
+  setPoints();
+  if ( dLat == cLat && dLng == cLng )
+  {
+    Serial.println("Arrived at Destination");
+    loc = 1; 
+   
+    delay(500); 
+    
+  }
+  else{
+    loc = 0; 
+    calculateServo(); 
+    servoMove();  
+    escOn(1550);
+    
+    //Turn off esc
+    delay(2000);
+    escOff();
+     
+  }
+  setStatus();
+  
+}
+void escOn(int speed){
+ 
+ servoEsc.writeMicroseconds(1500);
+ delay(100); 
+ servoEsc.writeMicroseconds(speed);
+  
+}
+
+void escOff() {
+ servoEsc.writeMicroseconds(1500); 
+}
+void setDummys(){
+  String tmpout = "";
+  //String tmplat = "";
+  //String tmplng = "";
+  int tmpLeftPoint, tmpRightPoint;
+  char c;
+  while (tmplat.equals(""))
+  {
+  while (Serial.available() > 0) 
+    {  
+    c = Serial.read(); 
+    //Serial.write(c); 
+    if (c != '\n' && c != '\r' && c != '\n\r' && c != '\r\n' && c != 0)
+      {
+        tmpout = tmpout + String(c);
+        //Serial.write(c);
+      }
+     }
+   
+   if (!tmpout.equals(""))
+       {
+       tmpLeftPoint = tmpout.indexOf('<'); 
+       tmpRightPoint = tmpout.indexOf('>');
+       if (tmpRightPoint > tmpLeftPoint)
+         {
+         tmpout = tmpout.substring(tmpLeftPoint+1,tmpRightPoint); 
+         //Serial.println("Should have no <>'s: " + tmpout);
+         tmpLeftPoint = tmpout.indexOf(',');
+           if (tmpLeftPoint > 0)
+             {
+             tmplat = tmpout.substring(0,tmpLeftPoint);
+             tmplng = tmpout.substring(tmpLeftPoint+1, tmpout.length());
+             //Serial.println("Lat: " + tmplat);
+             //Serial.println("Long: " + tmplng);
+             dummyLat = tmplat.toFloat();
+             dummyLong = tmplng.toFloat();
+                 
+             tmpout = "";
+             dummySet = true;
+             }
+         }
+       }
+  }
+
+}
+void setPoints(){
+  //// Set current Lat and Lng and print 
+  if(gps.location.isValid()){
+    cLat = gps.location.lat();
+    cLng = gps.location.lng();
+    Serial.println("Receiving Vaild GPS Coordinates..."); 
+    isVal = 1; 
+  }
+  else{
+  Serial.println("Not Receiving vaild GPS Coordinates.Enter Dummy Variables:");
+   dummySet = false;
+   tmplat = "";
+   tmplng = "";
+   while(dummySet == false)
+      {
+       setDummys(); 
+      }
+   cLat = tmplat.toFloat();
+   cLng = tmplng.toFloat();
+   Serial.println(cLat,4);
+   Serial.println(cLng,4);  
+   isVal = 0; 
+  }
+  //// Set current Heading and print 
+  if(gps.course.isValid()){
+    Serial.println("Receiving Vaild GPS Heading..."); 
+    cCourse = gps.course.deg();
+  }
+  else{
+   // Serial.println("Not receiving vaild GPS Heading..Using dummy Heading");
+    cCourse = dummyCourse; 
+  }
+ // Set destination points 
+  if(communication == 1){
+   Serial.println("Receiving Valid destination Coordinates");
+   const char * tmpLat = lat.c_str();
+   const char * tmpLng = lng.c_str(); 
+    dLat = lat.toFloat(); 
+    dLng = lng.toFloat(); 
+ 
+  }
+  else{
+   Serial.println("Not Receiving valid destination Coordinates");
+   dLat = dummyDestLat;
+   dLat = dummyDestLong; 
+  }
+deltaLat=dLat-cLat;
+deltaLng=dLng-cLng; 
+}
+void calculateServo(){
+ //initial caclculations
+  
+ 
+ double rad=3.14/180;
+ int theta=round(atan(deltaLng/deltaLat)/rad);
+
+ //figure out if theta needs to be negative or positive
+ if(cLat>dLat)
+ {
+ theta=theta-180;
+ } 
+ theta=theta-cCourse;
+ theta=(theta+360)%360; 
+ if(theta>180){
+ theta=theta-360;
+ } 
+ else if(theta < -180){
+ theta=360+theta; 
+ } 
+ if(theta >90){
+ angle=180;
+ }
+ else if(theta < -90){
+ angle=0;
+ }
+ else{
+ angle=90+theta;
+ }
+
+   
+}
+
+
+void servoMove(){
+ Serial.print("Servo angle:");
+ Serial.println(angle);     
+ //Serial.end();
+ //ss.end();
+ //servo.attach(9); 
+ delay(2000);
+ servo.write(angle);
+ delay(2000);
+ //servo.detach();
+ //Serial.begin(9600);
+ //ss.begin(GPSBaud);
+}
+
+ void receiveEvent(int howMany) {
+  int leftPoint = 0;
+  int rightPoint = 0;
+  String out;
+  while (1 <= Wire.available()) { 
+    char c = Wire.read(); 
+    out = out + String(c); 
+      communication = 1;  
+   }
+   leftPoint = out.indexOf('<'); 
+   rightPoint = out.indexOf('>',leftPoint +1);
+   
+   if(leftPoint != rightPoint && rightPoint > leftPoint)
+   {
+    out = out.substring(leftPoint+1,rightPoint); 
+    leftPoint = out.indexOf(',');
+    lat = out.substring(0,leftPoint);
+    lng = out.substring(leftPoint+1, out.length());
+    
+   }
+ 
+ 
+} 
+
+void requestEvent() {
+ Serial.println(outCom); 
+ const char * st = outCom.c_str();
+ Wire.write(st);  
+}
+
+void setStatus(){
+  String tmpx1 = String(x1);
+  String tmpx2 = String(x2);
+  String tmpx3 = String(x3);
+  String tmpx4 = String(isVal);
+  String tmploc = String(loc);    
+  String tmpLat = String(cLat, 4);
+  String tmpLng = String(cLng, 4); 
+  outCom = tmpx1 + tmpx2 + tmpx3 + tmpx4 + tmploc + "," + tmpLat + "," + tmpLng; 
+  Serial.print("Status: ");
+  Serial.println(outCom); 
+}

@@ -1,23 +1,80 @@
-/*
-Integrated code for the Mega. Integrates the ESC, Servo, and GPS together.
-To-Do: Integrate I2C, Sonar and Compass with it.
-Version: 0.9
-Date: 11/8/2015
+/* 
+This is the integrated code for the Mega for our sensior design
+project. The Mega is interfaced with the GSM, GPS, temperature, 
+compass and Uno.
+
+Version 1.21
+11/18/2015
+Latest Changes: 
+Currently testing the full functionality.
+2a. GSM works.
+2b. GPS might work. Issue may have just been setupGPS.
+  Testing this 11/18. Have updated setupGPS
+2c. Temperature usually works. Might be getting 0 C now.
+  Testing this 11/18
+2d. Compass might or might not work. Uno wasn't on.
+  Testing this 11/18
+3. Organized the code a little.
+4. General logic should be there now for intended functionality. (excluding bluetooth and sonar)
 */
-
-#include <TinyGPS++.h>
 #include <SoftwareSerial.h>
-#include <Servo.h>
-#include <math.h> 
-#include <stdio.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
 #include <Wire.h>
-#include <stdlib.h>
+#include <TinyGPS++.h>
+#include <math.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_HMC5883_U.h>
 
-//initial setups 
-int PIN_Serial1_Rx = 19;
-int PIN_Serial1_Tx = 18;
-static const uint32_t GPSBaud = 9600;
+#define ADR_UNO 5
+#define rxPin 11
+#define txPin 10
+Adafruit_HMC5883_Unified mag = Adafruit_HMC5883_Unified(12345);
 
+#define STATPIN 9
+//#define PWKPIN 7
+#define TEMPPIN 4
+#define BATTERYREADPIN 4;
+
+String POSTPASS = "ST2015";
+
+#define SAMPLING_NUMBER 2
+#define SAMPLING_PERIOD 5  //Seconds between samples. 
+
+OneWire oneWire(TEMPPIN);
+DallasTemperature sensors(&oneWire);
+DeviceAddress ourThermometer = {0x28, 0x09, 0x25, 0x50, 0x06, 0x00, 0x00, 0xAB };
+
+String GETURL = "http://stumpthumpers.comuv.com/tx.php";
+String POSTURL = GETURL;
+String READURL = "http://stumpthumpers.comuv.com/destination.php";
+
+//Current lat and long
+//The defined values are dummy values to be used for the purpose of testing the sending of GPS coordinates.
+String GPSlat_present = "31.123456";
+String GPSlong_present = "-91.123456";
+String GPSlat_target = "20.2000";
+String GPSlong_target = "-90.1010";
+
+TinyGPSPlus gps;
+SoftwareSerial ss(rxPin,txPin);
+
+long startTime;
+long durationTime = 3000;
+long currentTime;
+
+long startTime_read;
+long durationTime_read = 60000; //in ms
+
+boolean flag_there = false;
+boolean data_sent = false;
+boolean flag_cmd = false;
+boolean flag_unoPresent = false;
+boolean flag_targetChange = false;
+
+int samplesTaken = 0;
+
+//For GPS
 //gps points 
 double dLat;
 double dLng;
@@ -28,19 +85,17 @@ double deltaLat = 10;
 double deltaLng = 10; 
 
 //dummy points for current 
-double dummyLat;
-double dummyLong;
+double dummyLat = 30.1234;
+double dummyLong = -70.5567;
 static const uint32_t dummyCourse = 90; 
 
 //dummy points for destination
 double dummyDestLat = 31.3412;
 double dummyDestLong = -91.3412;
 
+//for servo
+float angle;
 
-//mega transmission stuff
-int x1 = 0;
-int x2 = 0;
-int x3 = 0;
 int isVal = 0; 
 int loc; 
 String outCom; 
@@ -60,76 +115,524 @@ boolean dummySet = false;
 String tmplat;
 String tmplng; 
 
-//for servo 
-float angle;
-
-//for esc
-int PIN_SERVO = 5;
-int PIN_ESC = 7;
-int speed = 1600; 
-Servo servoEsc; 
-
-TinyGPSPlus gps;
-Servo servo;
-
-void setup()
-{
-  //starting the two serials 
-  Serial.begin(9600);  
-  Serial1.begin(9600);
-  servoEsc.attach(PIN_ESC);
-  servo.attach(PIN_SERVO);
-  while (!servo.attached()) {}
-  servo.write(angle);
- 
- // creating the wires for communication with mega 
-  communication = 0; 
-  Wire.begin(8);                
-  Wire.onReceive(receiveEvent); 
-  Wire.onRequest(requestEvent);
-
-  //ESC stuff
-
+void setup() {
+  // put your setup code here, to run once:
   
+  Serial.begin(115200);
+  //Serial.println("Arduino serial initialized!");
+  delay(10);
+
+  Serial2.begin(9600);
+  //Serial.println("Software serial initialized!");
+  delay(10);
+  
+  ss.begin(9600);
+  //Serial.println("GPS serial intialized!");
+  delay(10);
+  
+  sensors.begin();
+  sensors.setResolution(ourThermometer, 10);
+  
+  Wire.begin();
+  //Wire.onReceive(receiveEvent);
+  //Wire.onRequest(requestEvent);
 }
 
-void loop()
-{
+void loop() {
+  //delay(500);
+  //float batteryRead = analogRead(A4);
+  //Serial.print("Batter: " );
+  //Serial.println(batteryRead * (0.0049) * 11);
+  //Set up the Temperature sensor and GSM modem.
+  setupTemp();
+  setupModem();
+  setupGPS();
+  //setupCompass();
+  checkSlave(ADR_UNO, false);    //Check if Uno is connected.
   
-  setPoints();
-  if ( dLat == cLat && dLng == cLng )
+  //Execute a read to get the target location
+  /*
+  while(!gps.location.isValid())
+    {
+    Serial.print("Lat: " );
+    printFloat(gps.location.lat(), gps.location.isValid(), 6, 11);
+    Serial.print("Long: " );
+    printFloat(gps.location.lng(), gps.location.isValid(), 6, 11);
+    Serial.println();  
+  }
+  Serial.println("GPS on");
+  Serial.print("Lat: " );
+    printFloat(gps.location.lat(), gps.location.isValid(), 6, 11);
+    Serial.print("Long: " );
+    printFloat(gps.location.lng(), gps.location.isValid(), 6, 11);
+  */  
+  
+  Serial.println("READ WEBSITE TO GET NEW TARGET COORDINATES");
+  //sendRead();
+    
+  delay(1000);
+  startTime_read = millis();
+  //sendPost();
+  //cLat = dummyLat;
+  //cLng = dummyLong;
+  while(true)
+    {
+      //Get current location from GPS
+      setPoints();
+      if ( dLat == cLat && dLng == cLng )
+      {
+        Serial.println("Arrived at Destination");
+        flag_there = 1; 
+       
+        delay(500); 
+        
+      }
+      else{
+        //Get our heading
+        cCourse = getHeading();
+      
+        //Calculate the servo angle
+        calculateServo();
+      
+        //Send data to the Uno
+        sendToUno(ADR_UNO);
+        flag_there = 0; 
+      }
+      if (flag_there == true)
+        {
+          Serial.println("AT THE LOCATION");
+          //Send Samples
+          if (samplesTaken == 0)
+            {
+              
+              for (int k=0; k<SAMPLING_NUMBER; k++)
+                {
+                  Serial.println("SENDING SAMPLE " + String(k));
+                  sendPost();
+                  samplesTaken++;
+                    if (k < SAMPLING_NUMBER-1)
+                      delay(SAMPLING_PERIOD*1000);  //Wait sampling period.
+                }
+                Serial.println("SAMPLES SENT");
+                startTime_read = millis();
+            }
+          
+          //Serial.println("READING ... ");
+          //flag_targetChange is updated by sendRead if the read gps location is new
+          //set up timer so read only happens every n seconds
+          if (millis() > startTime_read + durationTime_read)
+            {
+              //sendRead();
+              startTime_read = millis();
+              Serial.println("READ CMD SENT");
+            }
+        }
+      readResponse();
+      delay(500);
+    }
+}
+
+/*
+    START OF TRANSMISSION-SPECIFIC FUNCTIONS
+*/
+
+String issueAndSave(const char* msg) {
+   String out = "";
+   char in_c;
+   Serial2.println(msg);
+   delay(500);
+   while (Serial2.available()){
+    in_c = Serial2.read();
+    Serial.write(in_c);
+    out = out + String(in_c);
+    delay(10);
+  }
+  return out;
+}
+
+void issueCommand(const char* msg) {
+  Serial2.println(msg);
+  delay(500);
+  readResponse();
+  delay(500);
+}
+
+void issueCommand2(const char* msg, const char* resp) {
+  String checkFor = resp;
+  int checkForLength = checkFor.length();
+  char output[checkForLength];
+  String outStr;
+  int i = checkForLength - 1;
+  byte in_b;
+  boolean canGo = false;
+  boolean sentData = false;
+  flag_cmd = false;
+  startTime = millis();
+  while (canGo == false)
   {
-    Serial.println("Arrived at Destination");
-    loc = 1; 
-   
-    delay(500); 
-    
+  if (checkForLength <= 1)
+  {
+    canGo = true;
+    Serial2.println(msg); 
+    delay(500);
+    readResponse();
+    delay(500);
   }
-  else{
-    loc = 0; 
-    calculateServo(); 
-    servoMove();  
-    escOn(1550);
-    
-    //Turn off esc
-    delay(2000);
-    escOff();
-     
-  }
-  setStatus();
-  
-}
-void escOn(int speed){
+  else
+  {
+    if (sentData == false)
+      {
+        sentData = true;
+        Serial2.println(msg);
+        //canGo = true;  //Don't want to just endlessly just resend the command. Give up after three attempts.
+      }
+    delay(500);
+    while (Serial2.available()) {
+       in_b = Serial2.read();
+       Serial.write(in_b);
+       if (in_b != 0 && in_b != '\n' && in_b != '\r' && in_b !='\n\r' && in_b != '\r\n')
+       {
+          if (i > 1)
+          {
+          for(int k=1; k < i; k++)
+            {
+              output[k-1] = output[k];
+            }
+          output[i] = in_b;
+          }else
+          {
+            output[0] = output[1];
+            output[1] = in_b;
+          }
+       }
+       delay(10); 
+    }
+    String test;
+    for (int k=0; k < checkForLength; k++)
+      {
+        test = test + String(output[k]);
+      }
+    //Serial.println("Output: " + test);
+    if (test == checkFor)
+      {
+       canGo = true;
+      }
  
- servoEsc.writeMicroseconds(1500);
- delay(100); 
- servoEsc.writeMicroseconds(speed);
+    if (millis() > startTime + durationTime)
+      {
+        //Time's up
+        flag_cmd = true;
+        canGo = true;
+      }
+ }
+ 
+ }
+}
+
+void readResponse() {
+  while (Serial2.available()){
+    if (Serial2.available() >= 64)
+      {
+        Serial.println("Overflooooow");
+      }
+    Serial.write(Serial2.read());
+    delay(10);
+  }
+}
+
+
+/*
+Sends an HTTP GET request to the website. The url for the form is defined by GETURL
+The final url to be used will be:
+GETURL?tmp=TEMPVALUE&lat=LATVALUE&long=LONGVALUE
+The TEMPVALUE is obtained within the function. The current GPS Coordinates are stored in 
+the global variables, GPSlat_present and GPSlong_present
+
+result is the url to be supplied to the Quectel M95 after sending the AT+QHTTPURL=n,m command where n is the size (in bytes) of result
+resultInfop is the pointer that points to the string/char array of the AT+QHTTPURL command and resultp is the pointer for result.
+
+*/
+void sendGet() {
+  //Create the URL to send the HTTP GET request to.
+  String result = GETURL + "?tmp=" + String(getTemperature(ourThermometer)) + "&lat=" + GPSlat_present + "&long=" + GPSlong_present + "&pw=" + POSTPASS;
+  //Prepare the AT command that declares the amount of bytes of the url to send the request to and the max time to send (in seconds)
+  String resultInfo = "AT+QHTTPURL=" + String(result.length()) + ",30";
+  //Convert the two above strings to const char *, which is what the issueCommand function requires
+  const char * resultp = result.c_str();
+  const char * resultInfop = resultInfo.c_str();
+  
+  //Issue the AT commands
+  issueCommand("AT+QIFGCNT=0");
+  issueCommand("AT+QIDNSIP=1");
+  issueCommand("AT+QICSGP=1,\"truphone.com\",\"\",\"\""); //Set the APN
+  
+  issueCommand(resultInfop);
+  issueCommand(resultp);
+  issueCommand2("AT+QHTTPGET=60","OK");
+  //delay(5000);
+  issueCommand("AT+QHTTPREAD=30");  //Send the read request. Not currently in use.  
+  delay(2000);
+  issueCommand("AT+QIDEACT");
   
 }
 
-void escOff() {
- servoEsc.writeMicroseconds(1500); 
+/*
+Sends an HTTP POST request to the website. The url for the form is defined by POSTURL. (Which is currently the same as GETURL
+The TEMPVALUE is obtained within the function (like with sendGet(), using getTemperature)
+Lat and Long are saved within the global variables.
+
+result is the url to be supplied to AT+QHTTPURL=n,m where n is the size (in bytes) of result
+
+*/
+void sendPost() {
+  String result = POSTURL;  
+  String resultInfo = "AT+QHTTPURL=" + String(result.length()) + ",30";
+   String dataToSend = "msg=" + String(getTemperature(ourThermometer));
+  dataToSend = dataToSend + "||" + String(GPSlat_present);
+  dataToSend = dataToSend + "||" + String(GPSlong_present);
+  dataToSend = dataToSend + "||" + POSTPASS;
+  
+  String postInfo = "AT+QHTTPPOST=" + String(dataToSend.length()) + ",50,10";
+  
+  //Convert the above strings to const char *, which is what the issueCommand function requires
+  const char * resultp = result.c_str();
+  const char * resultInfop = resultInfo.c_str();
+  const char * dataToSendp = dataToSend.c_str();
+  const char * postInfop = postInfo.c_str();
+
+  //Issue the AT commands  
+  issueCommand("AT+QIFGCNT=0");
+  issueCommand("AT+QIDNSIP=1");
+  issueCommand("AT+QICSGP=1,\"truphone.com\",\"\",\"\""); //Set the APN
+  issueCommand(resultInfop);
+  issueCommand(resultp);
+  issueCommand2(postInfop,"CONNECT");
+  issueCommand2(dataToSendp,"OK");
+  issueCommand("AT+QHTTPREAD=30"); //Send the read request. Not currently in use. 
+  issueCommand("AT+QIDEACT");
+  
 }
+
+void sendRead() {
+  //Create the URL to send the HTTP GET request to.
+  String result = READURL;
+  String result2;
+  //Prepare the AT command that declares the amount of bytes of the url to send the request to and the max time to send (in seconds)
+  String resultInfo = "AT+QHTTPURL=" + String(result.length()) + ",30";
+  //Convert the two above strings to const char *, which is what the issueCommand function requires
+  const char * resultp = result.c_str();
+  const char * resultInfop = resultInfo.c_str();
+  
+  String output;
+  //char outChar[ ];
+  boolean gettingLL = false;
+  boolean writingLat = false;
+  int leftPoint = 0;
+  int rightPoint = 0;
+  
+  //Issue the AT commands
+  issueCommand("AT+QIFGCNT=0");
+  issueCommand("AT+QIDNSIP=1");
+  issueCommand("AT+QICSGP=1,\"truphone.com\",\"\",\"\""); //Set the APN
+  
+  issueCommand(resultInfop);
+  issueCommand(resultp);
+  issueCommand2("AT+QHTTPGET=60","OK");
+  output = issueAndSave("AT+QHTTPREAD=30");  //Send the read request.
+  leftPoint = output.indexOf('[');
+  rightPoint = output.indexOf(']', leftPoint + 1);
+  if (leftPoint != rightPoint && rightPoint > leftPoint)
+    {
+    output = output.substring(leftPoint+1,rightPoint);
+    leftPoint = output.indexOf(',');    // Is now a middle point
+    result = output.substring(0,leftPoint);
+    result2 = output.substring(leftPoint+1, output.length());
+    if (result.equals(GPSlat_target) && result2.equals(GPSlong_target))
+      {
+        //No change to the target location
+        flag_targetChange = false;
+      }
+    else 
+      {
+        //There's been a change to the target location
+        GPSlat_target = result;
+        GPSlong_target= result2;
+        flag_targetChange = true;
+        samplesTaken = 0; // Reset the samples taken so we can take more at the new location.
+        Serial.println("TARGET LOCATION CHANGED: samplesTaken = 0");
+      }
+    }
+  //delay(5000);
+  issueCommand2("AT+QIDEACT","DEACT OK");
+   
+}
+
+void setupModem() {
+ issueCommand2("AT","OK");
+ while (flag_cmd)
+  {
+    //Modem not communicating properly, try again
+    issueCommand2("AT","OK");
+    delay(500);
+  }
+  Serial.println("Modem and Mega communication established.");
+}
+
+/*
+    END OF TRANSMISSION-SPECIFIC FUNCTIONS
+*/
+
+/*
+    START OF TEMPERATURE-SPECIFIC FUNCTIONS
+*/
+
+float getTemperature(DeviceAddress deviceAddress)
+{
+  
+  float tempC = sensors.getTempC(deviceAddress);
+  delay(100);
+  float tempC2 = sensors.getTempC(deviceAddress);
+  if (tempC2 != tempC)
+    {
+      delay(300);
+      tempC = sensors.getTempC(deviceAddress);
+    }
+  if (tempC == -127.00){
+  //Serial.print("Error getting Temperature.");
+  tempC = -999;
+  }
+  return tempC;
+}
+ 
+void setupTemp() {
+  float tempC = getTemperature(ourThermometer);
+  delay(500);
+  float tempC2 = getTemperature(ourThermometer);
+  //85 degrees C is the value after booting up. Can also occur
+  //if there's a power issue (i.e., not enough to temp)
+  while (tempC2 != tempC || tempC2 == 85)
+   {
+     if (tempC2 == 85)
+       {
+       Serial.println("85 C. Possible power issue.");
+
+        // report parasite power requirements
+        Serial.print("Parasite power is: "); 
+        if (sensors.isParasitePowerMode()) Serial.println("ON");
+        else Serial.println("OFF");
+        
+        Serial.print(sensors.getResolution(ourThermometer), DEC); 
+        
+        Serial.print("Requesting temperatures...");
+        sensors.requestTemperatures(); // Send the command to get temperatures
+        Serial.println("DONE");
+             }
+           tempC2 = getTemperature(ourThermometer);
+           delay(500);
+   } 
+   Serial.println("Temperature sensor is online with temp " + String(tempC));
+   Serial.println();
+}
+
+/*
+    END OF TEMPERATURE-SPECIFIC FUNCTIONS
+*/
+
+/*
+    START OF I2C-SPECIFIC FUNCTIONS
+*/
+void checkSlave(int a, boolean b) {
+  boolean slaveUp = false;
+  boolean check = b;
+  while (slaveUp == false)
+  {
+  Wire.beginTransmission(a);
+  if (Wire.endTransmission() == 0)
+    {
+      if (check == true)
+        {
+         if (flag_unoPresent == false)
+          {
+            flag_unoPresent = true;
+            sendToUno(8);
+            Serial.println("Connection restored. Resending data ... ");
+          }
+        }
+      else
+        {
+        flag_unoPresent = true;
+        }
+      slaveUp = true;
+    }else
+    {
+      flag_unoPresent = false;
+      Serial.println("Slave not found ... Trying again");
+      delay(2000);
+    }
+  delay(500);
+  }
+}
+
+void sendToUno(int a) {
+ String angle_out = String(angle);
+ String fthere_out = String(flag_there);
+ 
+ const char * outp = angle_out.c_str();
+ const char * ftherep = fthere_out.c_str();
+ 
+ Wire.beginTransmission(a);
+ Wire.write("<");
+ Wire.write(outp);
+ Wire.write(",");
+ Wire.write(ftherep);
+ Wire.write(">");
+ Wire.endTransmission(); 
+}
+
+void requestToUno(int a, int b) {
+   /*
+   Currently Unused -- no need to request any information from the Uno
+  boolean printCheck = false;
+  String output, output_piece;
+  int flag1, flag2, flag3, flag4, flag5;
+  Wire.requestFrom(a,b);
+  while (Wire.available() > 1) {
+    char c = Wire.read();
+      if (c != '\n' && c != '\r' && c != '\n\r' && c != '\r\n' && c != 'ÿ' && c != 0 && c != ' ')
+        {
+        output = output + String(c);
+        printCheck = true;
+        Serial.print(c);
+        }
+  }
+  if (printCheck == true)
+    {
+      Serial.println();
+      //Parse Info from Uno
+        //Get the Flag Data
+        flag1 = (output.substring(0,1)).toInt();
+        flag2 = (output.substring(1,2)).toInt();
+        flag3 = (output.substring(2,3)).toInt();
+        flag4 = (output.substring(3,4)).toInt();
+        flag_there = (output.substring(4,5)).toInt();
+        GPSlat_present = output.substring(output.indexOf(',')+1,output.lastIndexOf(','));
+        GPSlong_present = output.substring(output.lastIndexOf(',')+1, output.length());
+        //output_piece = output.substring(0,output.indexOf(','));
+        Serial.println("Flag Received: " + String(flag1) + ", " + String(flag2) + ", " + String(flag3) + ", " + String(flag4) + ", " + String(flag_there));
+        Serial.println("Lat Present: " + GPSlat_present);
+        Serial.println("Long present: " + GPSlong_present);
+    }
+    */
+}
+
+/*
+    END OF I2C-SPECIFIC FUNCTIONS
+*/
+
+/*
+    START OF GPS-SPECIFIC FUNCTIONS
+*/
+
 void setDummys(){
   String tmpout = "";
   //String tmplat = "";
@@ -199,6 +702,7 @@ void setPoints(){
    isVal = 0; 
   }
   //// Set current Heading and print 
+  /*
   if(gps.course.isValid()){
     Serial.println("Receiving Vaild GPS Heading..."); 
     cCourse = gps.course.deg();
@@ -206,7 +710,11 @@ void setPoints(){
   else{
    // Serial.println("Not receiving vaild GPS Heading..Using dummy Heading");
     cCourse = dummyCourse; 
-  }
+  }*/
+ // Set current Heading using Compass and print
+ cCourse = getHeading();
+ Serial.println("Heading: " + String(cCourse));
+
  // Set destination points 
   if(communication == 1){
    Serial.println("Receiving Valid destination Coordinates");
@@ -224,10 +732,10 @@ void setPoints(){
 deltaLat=dLat-cLat;
 deltaLng=dLng-cLng; 
 }
+
 void calculateServo(){
  //initial caclculations
   
- 
  double rad=3.14/180;
  int theta=round(atan(deltaLng/deltaLat)/rad);
 
@@ -253,64 +761,195 @@ void calculateServo(){
  else{
  angle=90+theta;
  }
-
-   
+Serial.println("Angle is " + String(angle));
+Serial.println("cLat is " + String(cLat));
+Serial.println("cLng is " + String(cLng));
+Serial.println("Theta is " + String(theta));
 }
 
-
-void servoMove(){
- Serial.print("Servo angle:");
- Serial.println(angle);     
- //Serial.end();
- //ss.end();
- //servo.attach(9); 
- delay(2000);
- servo.write(angle);
- delay(2000);
- //servo.detach();
- //Serial.begin(9600);
- //ss.begin(GPSBaud);
+void setupGPS()  {
+  Serial.println("Setup GPS");
+  long timerStart = millis(); //ms
+  long timerDelay = 10L;  //Minutes to give GPS to find satellites
+  timerDelay = timerDelay * 1000 * 60;  //ms
+  int printInterval = 10;
+  int i = 1;
+  long currentTime;
+  long remainingTime;
+  
+  while (!gps.location.isValid())
+    {
+      //Check if it's a connection issue
+      
+      //Check if we've waited the desired amount of minutes before proceeding.
+      if (millis() > (timerStart + timerDelay))
+        {
+          //Waited timerDelay minutes, time to quit trying.
+          Serial.println("Waited " + String(timerDelay/(60*1000)) + " minutes. Switching to Bluetooth/Test Data from Serial.");
+          break;
+        }
+        
+      //Check if it's time to post another message to say we aren't receiving anything.
+      if (millis() >= (timerStart+i*(timerDelay/printInterval)))
+        {
+          remainingTime = (timerStart + timerDelay) - (timerStart+i*(timerDelay/printInterval));
+          i++;
+          Serial.print("GPS still not receiving coordinates. "); 
+          Serial.println(String(remainingTime * 1000) + " seconds remaining.");
+        }
+    }
+  if (gps.location.isValid())
+    Serial.println("GPS is online. Lat: " + String(gps.location.lat(),6) + ", Long: " + String(gps.location.lng(),6));
+  /*
+  while((millis() < (timerStart + timerDelay)) && gps.location.isValid() == 0)
+    {
+      currentTime = millis();
+      
+      if (gps.location.isValid() == 1)
+        {
+          check = true;
+          timerStart = 0;
+          timerDelay = 0;
+          Serial.println("GPS is online.");
+        }
+        else
+        {
+          if (currentTime >= (timerStart+i*(timerDelay/10)))
+            {
+              i++;
+              Serial.println(i);
+              Serial.println("GPS not receiving valid coordinates ...");
+              canPrint = false;
+              
+            }
+        }
+    }
+  if (check == false)
+    {
+     Serial.println("GPS is not working ...");
+     while(true)
+      {
+        //Do nothing :(
+      } 
+    }
+    */
 }
 
- void receiveEvent(int howMany) {
-  int leftPoint = 0;
-  int rightPoint = 0;
-  String out;
-  while (1 <= Wire.available()) { 
-    char c = Wire.read(); 
-    out = out + String(c); 
-      communication = 1;  
-   }
-   leftPoint = out.indexOf('<'); 
-   rightPoint = out.indexOf('>',leftPoint +1);
-   
-   if(leftPoint != rightPoint && rightPoint > leftPoint)
-   {
-    out = out.substring(leftPoint+1,rightPoint); 
-    leftPoint = out.indexOf(',');
-    lat = out.substring(0,leftPoint);
-    lng = out.substring(leftPoint+1, out.length());
+// This custom version of delay() ensures that the gps object
+// is being "fed".
+static void smartDelay(unsigned long ms)
+{
+  unsigned long start = millis();
+  do 
+  {
+    while (ss.available())
+      gps.encode(ss.read());
+  } while (millis() - start < ms);
+}
+
+static void printFloat(float val, bool valid, int len, int prec)
+{
+  if (!valid)
+  {
+    while (len-- > 1)
+      Serial.print('*');
+    Serial.print(' ');
+  }
+  else
+  {
+    Serial.print(val, prec);
+    int vi = abs((int)val);
+    int flen = prec + (val < 0.0 ? 2 : 1); // . and -
+    flen += vi >= 1000 ? 4 : vi >= 100 ? 3 : vi >= 10 ? 2 : 1;
+    for (int i=flen; i<len; ++i)
+      Serial.print(' ');
+  }
+  smartDelay(0);
+}
+
+static void printInt(unsigned long val, bool valid, int len)
+{
+  char sz[32] = "*****************";
+  if (valid)
+    sprintf(sz, "%ld", val);
+  sz[len] = 0;
+  for (int i=strlen(sz); i<len; ++i)
+    sz[i] = ' ';
+  if (len > 0) 
+    sz[len-1] = ' ';
+  Serial.print(sz);
+  smartDelay(0);
+}
+
+static void printDateTime(TinyGPSDate &d, TinyGPSTime &t)
+{
+  if (!d.isValid())
+  {
+    Serial.print(F("********** "));
+  }
+  else
+  {
+    char sz[32];
+    sprintf(sz, "%02d/%02d/%02d ", d.month(), d.day(), d.year());
+    Serial.print(sz);
+  }
+  
+  if (!t.isValid())
+  {
+    Serial.print(F("******** "));
+  }
+  else
+  {
+    char sz[32];
+    sprintf(sz, "%02d:%02d:%02d ", t.hour(), t.minute(), t.second());
+    Serial.print(sz);
+  }
+
+  printInt(d.age(), d.isValid(), 5);
+  smartDelay(0);
+}
+
+static void printStr(const char *str, int len)
+{
+  int slen = strlen(str);
+  for (int i=0; i<len; ++i)
+    Serial.print(i<slen ? str[i] : ' ');
+  smartDelay(0);
+}
+
+/*
+    END OF GPS-SPECIFIC FUNCTIONS
+*/
+
+/*
+    START OF COMPASS-SPECIFIC FUNCTIONS
+*/
+
+float getHeading() {
+  sensors_event_t event;
+  mag.getEvent(&event);
+  float heading = atan2(event.magnetic.y, event.magnetic.x);
+  // Once you have your heading, you must then add your 'Declination Angle', which is the 'Error' of the magnetic field in your location.
+  // Find yours here: http://www.magnetic-declination.com/
+  // Mine is: -13* 2' W, which is ~13 Degrees, or (which we need) 0.22 radians
+  // If you cannot find your Declination, comment out these two lines, your compass will be slightly off.
+  
+  float declinationAngle = 0;
+  heading += declinationAngle;
+  
+  // Correct for when signs are reversed.
+  if(heading < 0)
+    heading += 2*PI;
     
-   }
- 
- 
-} 
-
-void requestEvent() {
- Serial.println(outCom); 
- const char * st = outCom.c_str();
- Wire.write(st);  
+  // Check for wrap due to addition of declination.
+  if(heading > 2*PI)
+    heading -= 2*PI;
+   
+  // Convert radians to degrees for readability.
+  float headingDegrees = heading * 180/M_PI;
+  return headingDegrees;
 }
 
-void setStatus(){
-  String tmpx1 = String(x1);
-  String tmpx2 = String(x2);
-  String tmpx3 = String(x3);
-  String tmpx4 = String(isVal);
-  String tmploc = String(loc);    
-  String tmpLat = String(cLat, 4);
-  String tmpLng = String(cLng, 4); 
-  outCom = tmpx1 + tmpx2 + tmpx3 + tmpx4 + tmploc + "," + tmpLat + "," + tmpLng; 
-  Serial.print("Status: ");
-  Serial.println(outCom); 
-}
+/*
+    END OF COMPASS-SPECIFIC FUNCTIONS
+*/

@@ -3,19 +3,12 @@ This is the integrated code for the Mega for our sensior design
 project. The Mega is interfaced with the GSM, GPS, temperature, 
 compass and Uno.
 
-Version 1.21
+Version 1.22
 11/18/2015
 Latest Changes: 
-Currently testing the full functionality.
-2a. GSM works.
-2b. GPS might work. Issue may have just been setupGPS.
-  Testing this 11/18. Have updated setupGPS
-2c. Temperature usually works. Might be getting 0 C now.
-  Testing this 11/18
-2d. Compass might or might not work. Uno wasn't on.
-  Testing this 11/18
-3. Organized the code a little.
-4. General logic should be there now for intended functionality. (excluding bluetooth and sonar)
+1. Redid wiring to fit components in smaller container
+2. Currently testing the full functionality.
+2a. GSM works. GPS works. Temp works. Compass works.
 */
 #include <SoftwareSerial.h>
 #include <OneWire.h>
@@ -147,7 +140,7 @@ void loop() {
   setupTemp();
   setupModem();
   setupGPS();
-  //setupCompass();
+  setupCompass();
   checkSlave(ADR_UNO, false);    //Check if Uno is connected.
   
   //Execute a read to get the target location
@@ -165,8 +158,8 @@ void loop() {
     printFloat(gps.location.lat(), gps.location.isValid(), 6, 11);
     Serial.print("Long: " );
     printFloat(gps.location.lng(), gps.location.isValid(), 6, 11);
-  */  
-  
+    
+  */
   Serial.println("READ WEBSITE TO GET NEW TARGET COORDINATES");
   //sendRead();
     
@@ -770,7 +763,7 @@ Serial.println("Theta is " + String(theta));
 void setupGPS()  {
   Serial.println("Setup GPS");
   long timerStart = millis(); //ms
-  long timerDelay = 10L;  //Minutes to give GPS to find satellites
+  long timerDelay = 5L;  //Minutes to give GPS to find satellites
   timerDelay = timerDelay * 1000 * 60;  //ms
   int printInterval = 10;
   int i = 1;
@@ -780,6 +773,12 @@ void setupGPS()  {
   while (!gps.location.isValid())
     {
       //Check if it's a connection issue
+      
+      Serial.print("Lat: " );
+      printFloat(gps.location.lat(), gps.location.isValid(), 6, 11);
+      Serial.print("Long: " );
+      printFloat(gps.location.lng(), gps.location.isValid(), 6, 11);
+      Serial.println();  
       
       //Check if we've waited the desired amount of minutes before proceeding.
       if (millis() > (timerStart + timerDelay))
@@ -795,7 +794,8 @@ void setupGPS()  {
           remainingTime = (timerStart + timerDelay) - (timerStart+i*(timerDelay/printInterval));
           i++;
           Serial.print("GPS still not receiving coordinates. "); 
-          Serial.println(String(remainingTime * 1000) + " seconds remaining.");
+          Serial.println(String(remainingTime /1000) + " seconds remaining. " + String(remainingTime/(1000*60)) + " minutes remaining.");
+          Serial.println("Lat: " + String(gps.location.lat(),6) + ", Long: " + String(gps.location.lng(),6));
         }
     }
   if (gps.location.isValid())
@@ -948,6 +948,11 @@ float getHeading() {
   // Convert radians to degrees for readability.
   float headingDegrees = heading * 180/M_PI;
   return headingDegrees;
+}
+
+void setupCompass() {
+   Serial.println("Heading: " + String(getHeading(),4));
+   delay(500); 
 }
 
 /*

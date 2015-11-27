@@ -3,12 +3,10 @@ This is the integrated code for the Mega for our sensior design
 project. The Mega is interfaced with the GSM, GPS, temperature, 
 compass, Bluetooth and Uno.
 
-Version 1.3
-11/22/2015
+Version 1.31
+11/27/2015
 Latest Changes: 
-1. Code for almost-full successful system test on land.
-   Missing the sonar module, but everything else is working. 
-   It currently requires bluetooth, however.
+Full-system testing.
 
 */
 #include <SPI.h>
@@ -22,6 +20,7 @@ Latest Changes:
 #include <math.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_HMC5883_U.h>
+#include "compass.h"
 
 #define ADR_UNO 5
 #define rxPin 11
@@ -74,7 +73,6 @@ long durationTime_read = 60000; //in ms
 boolean flag_there = false;
 boolean data_sent = false;
 boolean flag_cmd = false;
-boolean flag_unoPresent = false;
 boolean flag_targetChange = false;
 
 int samplesTaken = 0;
@@ -135,6 +133,18 @@ Adafruit_BLE_UART uart = Adafruit_BLE_UART(ADAFRUITBLE_REQ, ADAFRUITBLE_RDY, ADA
 int SERVO_MIN = 65;    //Limits (in degrees)
 int SERVO_MAX = 140;
 
+#define Task_t 10
+int dt=0;
+unsigned long t;
+
+//Status Variables
+int STATUS_BTLE = 0;
+int STATUS_GSM = 0;
+int STATUS_TEMP = 0;
+int STATUS_GPS = 0;
+int STATUS_COMPASS = 0;
+int STATUS_UNO = 0;
+
 void setup() {
   // put your setup code here, to run once:
   
@@ -156,27 +166,49 @@ void setup() {
   Wire.begin();
   //Wire.onReceive(receiveEvent);
   //Wire.onRequest(requestEvent);
- // BTLEserial.begin();
-    uart.setRXcallback(rxCallback);
+  uart.setRXcallback(rxCallback);
   uart.setACIcallback(aciCallback);
-  // uart.setDeviceName("NEWNAME"); /* 7 characters max! */
   uart.begin();
+  
+  compass_x_gainError = 0.89;
+  compass_y_gainError = 0.93;
+  compass_z_gainError = 0.96;
+  compass_x_offset = -198.54;
+  compass_y_offset = 39.14;
+  compass_z_offset = 1285.23;
+  compass_init(2);
 }
 aci_evt_opcode_t laststatus = ACI_EVT_DISCONNECTED;
+
+void displaySensorDetails(void)
+{
+  sensor_t sensor;
+  mag.getSensor(&sensor);
+  Serial.println("------------------------------------");
+  Serial.print  ("Sensor:       "); Serial.println(sensor.name);
+  Serial.print  ("Driver Ver:   "); Serial.println(sensor.version);
+  Serial.print  ("Unique ID:    "); Serial.println(sensor.sensor_id);
+  Serial.print  ("Max Value:    "); Serial.print(sensor.max_value); Serial.println(" uT");
+  Serial.print  ("Min Value:    "); Serial.print(sensor.min_value); Serial.println(" uT");
+  Serial.print  ("Resolution:   "); Serial.print(sensor.resolution); Serial.println(" uT");  
+  Serial.println("------------------------------------");
+  Serial.println("");
+  delay(500);
+}
+
 void loop() {
   //delay(500);
   //float batteryRead = analogRead(A4);
   //Serial.print("Batter: " );
   //Serial.println(batteryRead * (0.0049) * 11);
   //Set up the Temperature sensor and GSM modem.
-  //bluetooth();
   uart.pollACI();
   //Setup devices
   setupTemp();
-  setupModem();
-  setupGPS(2, 40);
   setupCompass();
   checkSlave(ADR_UNO, false);    //Check if Uno is connected.
+  setupGPS(2, 20);
+  setupModem();
   
   //Execute a read to get the target location
   Serial.println("READ WEBSITE TO GET NEW TARGET COORDINATES");
@@ -190,10 +222,12 @@ void loop() {
       uart.pollACI();
       //Get current location from GPS
       setPoints();
+      uart.pollACI();
       updateDistance();
       //if ( dLat == cLat && dLng == cLng)
       if (distanceFrom <= DISTANCE_ACCURACY)
       {
+        uart.pollACI();
         Serial.println("Arrived at Destination");
         blueOut("Arrived!");
         flag_there = 1; 
@@ -206,13 +240,16 @@ void loop() {
               blueOut("Sending Samples");    
               for (int k=0; k<SAMPLING_NUMBER; k++)
                 {
+                    uart.pollACI();
                     Serial.println("SENDING SAMPLE " + String(k));
+                    setupModem();
                     blueOut("Sending sample " + String(k+1));
                     sendPost();
                     samplesTaken++;
                       if (k < SAMPLING_NUMBER-1)
                         delay(SAMPLING_PERIOD*1000);  //Wait sampling period.
                 }  
+              uart.pollACI();
               Serial.println("SAMPLES SENT");
               blueOut("Samples sent");
               startTime_read = millis();
@@ -223,6 +260,7 @@ void loop() {
             //set up timer so read only happens every n seconds
             if (millis() > startTime_read + durationTime_read)
               {
+                uart.pollACI();
                 sendRead();
                 if (flag_targetChange == 1)
                   {
@@ -235,8 +273,12 @@ void loop() {
           }
       }
       else{
+        uart.pollACI();
         //Get our heading
-        cCourse = getHeading();
+        if (STATUS_COMPASS == 1)
+          cCourse = getHeading();
+        //else
+        //  cCourse = gps.course.deg();
       
         //Calculate the servo angle
         calculateServo();
@@ -253,6 +295,17 @@ void loop() {
 /*
     START OF TRANSMISSION-SPECIFIC FUNCTIONS
 */
+
+String getSignalStrength(const char* msg) {
+   String out = issueAndSave(msg);
+   int leftPoint = out.indexOf(":");
+   int rightPoint = out.indexOf(",");
+   if (rightPoint > leftPoint)
+     out = out.substring(leftPoint+1,rightPoint);
+   else
+     out = "-1";
+   return out;
+}
 
 String issueAndSave(const char* msg) {
    String out = "";
@@ -409,8 +462,8 @@ void sendPost() {
   String result = POSTURL;  
   String resultInfo = "AT+QHTTPURL=" + String(result.length()) + ",30";
    String dataToSend = "msg=" + String(getTemperature(ourThermometer));
-  dataToSend = dataToSend + "||" + String(cLat);
-  dataToSend = dataToSend + "||" + String(cLng);
+  dataToSend = dataToSend + "||" + String(cLat,6);
+  dataToSend = dataToSend + "||" + String(cLng,6);
   dataToSend = dataToSend + "||" + GPSlat_target;
   dataToSend = dataToSend + "||" + GPSlong_target;
   dataToSend = dataToSend + "||" + POSTPASS;
@@ -501,10 +554,12 @@ void setupModem() {
     //Modem not communicating properly, try again
     issueCommand2("AT","OK");
     blueOut("Check Modem wiring.");
+    STATUS_GSM = 1;
     delay(500);
   }
+  String csq = getSignalStrength("AT+CSQ");
   Serial.println("Modem and Mega communication established.");
-  blueOut("Modem online");
+  blueOut("Modem on, SQ: " + csq);
 }
 
 /*
@@ -534,17 +589,18 @@ float getTemperature(DeviceAddress deviceAddress)
 }
  
 void setupTemp() {
+  delay(2000);
   float tempC = getTemperature(ourThermometer);
   delay(500);
   float tempC2 = getTemperature(ourThermometer);
   //85 degrees C is the value after booting up. Can also occur
   //if there's a power issue (i.e., not enough to temp)
-  while (tempC2 != tempC || tempC2 == 85 || tempC2 == -127)
+  while (tempC2 == 85 || tempC2 == -127)
    {
      if (tempC2 == 85 || -127)
        {
        Serial.println(String(tempC2) + ". Possible power issue.");
-       blueOut("Check temp wiring.");
+       blueOut("Tmp Error: " + String(tempC2));
        }
         // report parasite power requirements
         Serial.print("Parasite power is: "); 
@@ -563,6 +619,7 @@ void setupTemp() {
    Serial.println("Temperature sensor is online with temp " + String(tempC));
    Serial.println();
    blueOut("Temperature Working.");
+   STATUS_TEMP = 1;
 }
 
 /*
@@ -572,6 +629,7 @@ void setupTemp() {
 /*
     START OF I2C-SPECIFIC FUNCTIONS
 */
+
 void checkSlave(int a, boolean b) {
   boolean slaveUp = false;
   boolean check = b;
@@ -582,21 +640,21 @@ void checkSlave(int a, boolean b) {
     {
       if (check == true)
         {
-         if (flag_unoPresent == false)
+         if (STATUS_UNO == 0)
           {
-            flag_unoPresent = true;
+            STATUS_UNO = true;
             sendToUno(ADR_UNO);
             Serial.println("Connection restored. Resending data ... ");
           }
         }
       else
         {
-        flag_unoPresent = true;
+        STATUS_UNO = true;
         }
       slaveUp = true;
     }else
     {
-      flag_unoPresent = false;
+      STATUS_UNO = false;
       Serial.println("Slave not found ... Trying again");
       blueOut("Uno not found ...");
       delay(2000);
@@ -606,6 +664,7 @@ void checkSlave(int a, boolean b) {
 }
 
 void sendToUno(int a) {
+ uart.pollACI();
  String angle_out = String(angle);
  String fthere_out = String(flag_there);
  
@@ -618,7 +677,18 @@ void sendToUno(int a) {
  Wire.write(",");
  Wire.write(ftherep);
  Wire.write(">");
- Wire.endTransmission(); 
+ if (Wire.endTransmission() == 0)
+   {
+    //Successfully sent
+    STATUS_UNO = 1; 
+   }
+ else
+   {
+    //Failure to successfully send
+    STATUS_UNO = 0;
+    blueOut("Modem lost, recon..."); 
+    checkSlave(ADR_UNO,true);
+   }
 }
 
 void requestToUno(int a, int b) {
@@ -713,6 +783,7 @@ void setDummys(){
 void setPoints(){
   //// Set current Lat and Lng and print 
   if(gps.location.isValid()){
+    STATUS_GPS = 1;
     cLat = gps.location.lat();
     cLng = gps.location.lng();
     Serial.println("Receiving Vaild GPS Coordinates..."); 
@@ -735,6 +806,7 @@ void setPoints(){
    Serial.println(cLng,4);  
    isVal = 0; 
    */
+   STATUS_GPS = 0;
    bteLat = "";
    blueOut("Enter cGPS");
    while(bteLat.equals(""))
@@ -789,6 +861,8 @@ void updateDistance() {
 }
 
 void calculateServo(){
+  uart.pollACI();
+  float pAngle = angle;
  //initial caclculations
   
  double rad=3.14/180;
@@ -801,12 +875,14 @@ void calculateServo(){
  } 
  theta=theta-cCourse;
  theta=(theta+360)%360; 
+ 
  if(theta>180){
  theta=theta-360;
  } 
  else if(theta < -180){
  theta=360+theta; 
- } 
+ }
+ 
  if(theta >90){
  angle=180;
  }
@@ -816,17 +892,27 @@ void calculateServo(){
  else{
  angle=90+theta;
  }
+ 
 if (angle > SERVO_MAX)
   angle = SERVO_MAX;
 if (angle < SERVO_MIN)
   angle = SERVO_MIN;
-Serial.println("Angle is " + String(angle));
-Serial.println("cLat is " + String(cLat));
-Serial.println("cLng is " + String(cLng));
+//Serial.println("Angle is " + String(angle));
+updateDistance();
+//Serial.println("cLat is " + String(cLat));
+//Serial.println("cLng is " + String(cLng));
 Serial.println("Theta is " + String(theta));
 Serial.println("cLat: " + String(cLat,6) + ", cLng: " + String(cLng,6));
 Serial.println("dLat: " + String(dLat,6) + ", dLng: " + String(dLng,6));
 Serial.println("Distance Left: " + String(distanceFrom) + " m");
+
+
+uart.pollACI();
+if (angle != pAngle)
+  {
+   Serial.println("Angle: " + String(angle,4));
+   blueOut("Angle: " + String(angle,4)); 
+  }
 }
 
 void setupGPS(long t, int tInt)  {
@@ -884,6 +970,7 @@ void setupGPS(long t, int tInt)  {
     {
     Serial.println("GPS is online. Lat: " + String(gps.location.lat(),6) + ", Long: " + String(gps.location.lng(),6));
     blueOut("GPS online");
+    STATUS_GPS = 1;
     }
 }
 
@@ -983,10 +1070,8 @@ float getHeading() {
   float heading = atan2(event.magnetic.y, event.magnetic.x);
   // Once you have your heading, you must then add your 'Declination Angle', which is the 'Error' of the magnetic field in your location.
   // Find yours here: http://www.magnetic-declination.com/
-  // Mine is: -13* 2' W, which is ~13 Degrees, or (which we need) 0.22 radians
-  // If you cannot find your Declination, comment out these two lines, your compass will be slightly off.
-  
-  float declinationAngle = 0;
+  // Ours is 0° 5' or 0.08333 degrees or (pi/2160) rad
+  float declinationAngle = (1.454)/1000;
   heading += declinationAngle;
   
   // Correct for when signs are reversed.
@@ -999,12 +1084,29 @@ float getHeading() {
    
   // Convert radians to degrees for readability.
   float headingDegrees = heading * 180/M_PI;
-  return headingDegrees;
+  
+  //Calibrated result
+  compass_heading();
+  float bearing2 = bearing - 180;
+  if (bearing2 < 0)
+    bearing2 = bearing2 + 360;
+  return bearing2 + 0.0833;
+
 }
 
 void setupCompass() {
-   Serial.print("Heading: ");
-   Serial.println(getHeading());
+   if(!mag.begin())
+      {
+        STATUS_COMPASS = 0;
+        /* There was a problem detecting the HMC5883 ... check your connections */
+        Serial.println("Ooops, no HMC5883 detected ... Check your wiring!");
+        blueOut("Compass Not Found");
+        blueOut("Using GPS Instead");
+      }
+   STATUS_COMPASS = 1;
+   Serial.println("Compass Found");
+   blueOut("Compass Found.");
+   displaySensorDetails();
    delay(500); 
 }
 

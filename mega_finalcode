@@ -3,7 +3,7 @@ This is the integrated code for the Mega for our sensior design
 project. The Mega is interfaced with the GSM, GPS, temperature, 
 compass, Bluetooth and Uno.
 
-Version 1.31
+Version 1.32
 11/27/2015
 Latest Changes: 
 Full-system testing.
@@ -21,6 +21,10 @@ Full-system testing.
 #include <Adafruit_Sensor.h>
 #include <Adafruit_HMC5883_U.h>
 #include "compass.h"
+
+#define Task_t 10
+int dt=0;
+unsigned long t;
 
 #define ADR_UNO 5
 #define rxPin 11
@@ -133,10 +137,6 @@ Adafruit_BLE_UART uart = Adafruit_BLE_UART(ADAFRUITBLE_REQ, ADAFRUITBLE_RDY, ADA
 int SERVO_MIN = 65;    //Limits (in degrees)
 int SERVO_MAX = 140;
 
-#define Task_t 10
-int dt=0;
-unsigned long t;
-
 //Status Variables
 int STATUS_BTLE = 0;
 int STATUS_GSM = 0;
@@ -169,14 +169,18 @@ void setup() {
   uart.setRXcallback(rxCallback);
   uart.setACIcallback(aciCallback);
   uart.begin();
+
+  compass_x_gainError = 0.91;
+  compass_y_gainError = 0.96;
+  compass_z_gainError = 0.99;
+  compass_x_offset = -274.10;
+  compass_y_offset = 85.29;
+  compass_z_offset = 1252.43;
   
-  compass_x_gainError = 0.89;
-  compass_y_gainError = 0.93;
-  compass_z_gainError = 0.96;
-  compass_x_offset = -198.54;
-  compass_y_offset = 39.14;
-  compass_z_offset = 1285.23;
   compass_init(2);
+  compass_debug = 1;
+  compass_offset_calibration(3);
+
 }
 aci_evt_opcode_t laststatus = ACI_EVT_DISCONNECTED;
 
@@ -202,6 +206,10 @@ void loop() {
   //Serial.print("Batter: " );
   //Serial.println(batteryRead * (0.0049) * 11);
   //Set up the Temperature sensor and GSM modem.
+  t = millis();
+  compass_scalled_reading();
+  compass_heading();
+  
   uart.pollACI();
   //Setup devices
   setupTemp();
@@ -209,6 +217,8 @@ void loop() {
   checkSlave(ADR_UNO, false);    //Check if Uno is connected.
   setupGPS(2, 20);
   setupModem();
+  //dLat = 30.410316;
+  //dLng = -91.180486;
   
   //Execute a read to get the target location
   Serial.println("READ WEBSITE TO GET NEW TARGET COORDINATES");
@@ -537,6 +547,8 @@ void sendRead() {
         
         dLat = GPSlat_target.toFloat();
         dLng = GPSlong_target.toFloat();
+        blueOut("dLat: " + GPSlat_target);
+        blueOut("dLng: " + GPSlong_target); 
         flag_targetChange = true;
         samplesTaken = 0; // Reset the samples taken so we can take more at the new location.
         Serial.println("TARGET LOCATION CHANGED: samplesTaken = 0");
@@ -857,6 +869,11 @@ deltaLng=dLng-cLng;
 }
 
 void updateDistance() {
+ if (STATUS_GPS == 1)
+   {
+     cLat = gps.location.lat();
+     cLng = gps.location.lng();
+   }
  distanceFrom = gps.distanceBetween(cLat, cLng, dLat, dLng);  
 }
 
@@ -892,7 +909,10 @@ void calculateServo(){
  else{
  angle=90+theta;
  }
- 
+
+//Have to invert the angle
+angle = 180 - angle;
+
 if (angle > SERVO_MAX)
   angle = SERVO_MAX;
 if (angle < SERVO_MIN)
@@ -902,7 +922,11 @@ updateDistance();
 //Serial.println("cLat is " + String(cLat));
 //Serial.println("cLng is " + String(cLng));
 Serial.println("Theta is " + String(theta));
-Serial.println("cLat: " + String(cLat,6) + ", cLng: " + String(cLng,6));
+//Serial.println("cLat: " + String(cLat,6) + ", cLng: " + String(cLng,6));
+Serial.print("cLat: "); printFloat(cLat,gps.location.isValid(), 12, 6);
+Serial.println();
+Serial.print("cLng: "); printFloat(cLng,gps.location.isValid(), 12, 6);
+Serial.println();
 Serial.println("dLat: " + String(dLat,6) + ", dLng: " + String(dLng,6));
 Serial.println("Distance Left: " + String(distanceFrom) + " m");
 
@@ -911,7 +935,8 @@ uart.pollACI();
 if (angle != pAngle)
   {
    Serial.println("Angle: " + String(angle,4));
-   blueOut("Angle: " + String(angle,4)); 
+   blueOut("Angle: " + String(angle,4));
+   blueOut("H: " + String(cCourse) + ", " + String(gps.course.deg()));
   }
 }
 

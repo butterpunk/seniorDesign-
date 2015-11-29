@@ -3,8 +3,8 @@ This is the integrated code for the Mega for our sensior design
 project. The Mega is interfaced with the GSM, GPS, temperature, 
 compass, Bluetooth and Uno.
 
-Version 1.32
-11/27/2015
+Version 1.33
+11/29/2015
 Latest Changes: 
 Full-system testing.
 
@@ -177,9 +177,9 @@ void setup() {
   compass_y_offset = 85.29;
   compass_z_offset = 1252.43;
   
-  compass_init(2);
-  compass_debug = 1;
-  compass_offset_calibration(3);
+  //compass_init(2);
+  //compass_debug = 1;
+  //compass_offset_calibration(3);
 
 }
 aci_evt_opcode_t laststatus = ACI_EVT_DISCONNECTED;
@@ -206,9 +206,9 @@ void loop() {
   //Serial.print("Batter: " );
   //Serial.println(batteryRead * (0.0049) * 11);
   //Set up the Temperature sensor and GSM modem.
-  t = millis();
-  compass_scalled_reading();
-  compass_heading();
+  //t = millis();
+  //compass_scalled_reading();
+  //compass_heading();
   
   uart.pollACI();
   //Setup devices
@@ -548,7 +548,7 @@ void sendRead() {
         dLat = GPSlat_target.toFloat();
         dLng = GPSlong_target.toFloat();
         blueOut("dLat: " + GPSlat_target);
-        blueOut("dLng: " + GPSlong_target); 
+        blueOut("dLng: " + GPSlong_target);
         flag_targetChange = true;
         samplesTaken = 0; // Reset the samples taken so we can take more at the new location.
         Serial.println("TARGET LOCATION CHANGED: samplesTaken = 0");
@@ -566,9 +566,10 @@ void setupModem() {
     //Modem not communicating properly, try again
     issueCommand2("AT","OK");
     blueOut("Check Modem wiring.");
-    STATUS_GSM = 1;
+    STATUS_GSM = 0;
     delay(500);
   }
+  STATUS_GSM = 1;
   String csq = getSignalStrength("AT+CSQ");
   Serial.println("Modem and Mega communication established.");
   blueOut("Modem on, SQ: " + csq);
@@ -923,10 +924,18 @@ updateDistance();
 //Serial.println("cLng is " + String(cLng));
 Serial.println("Theta is " + String(theta));
 //Serial.println("cLat: " + String(cLat,6) + ", cLng: " + String(cLng,6));
-Serial.print("cLat: "); printFloat(cLat,gps.location.isValid(), 12, 6);
-Serial.println();
-Serial.print("cLng: "); printFloat(cLng,gps.location.isValid(), 12, 6);
-Serial.println();
+if (gps.location.isValid())
+  {
+    Serial.print("cLat: "); printFloat(cLat,gps.location.isValid(), 12, 6);
+    Serial.println();
+    Serial.print("cLng: "); printFloat(cLng,gps.location.isValid(), 12, 6);
+    Serial.println();
+  }
+else
+  {
+    Serial.println("cLat: " + String(cLat,6)); 
+    Serial.println("cLng: " + String(cLng,6));
+  }
 Serial.println("dLat: " + String(dLat,6) + ", dLng: " + String(dLng,6));
 Serial.println("Distance Left: " + String(distanceFrom) + " m");
 
@@ -936,7 +945,6 @@ if (angle != pAngle)
   {
    Serial.println("Angle: " + String(angle,4));
    blueOut("Angle: " + String(angle,4));
-   blueOut("H: " + String(cCourse) + ", " + String(gps.course.deg()));
   }
 }
 

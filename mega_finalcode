@@ -3,15 +3,16 @@ This is the integrated code for the Mega for our sensior design
 project. The Mega is interfaced with the GSM, GPS, temperature, 
 compass, Bluetooth and Uno.
 
-Version 1.35
-12/04/2015
+Version 1.36
+12/05/2015
 Latest Changes: 
-Sonar module connected and working. Need to finish integration.
-NewPing added and should be done working (no evasive manuevers).
+Cleaned up some deprecated features.
+Still need to do a final test.
 */
+
+//Include libraries
 #include <SPI.h>
 #include "Adafruit_BLE_UART.h"
-
 #include <SoftwareSerial.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
@@ -23,16 +24,10 @@ NewPing added and should be done working (no evasive manuevers).
 #include "compass.h"
 #include <NewPing.h>
 
-
-#define Task_t 10
-int dt=0;
-unsigned long t;
-
+//Define Pins
 #define ADR_UNO 5
 #define rxPin 11
 #define txPin 10
-Adafruit_HMC5883_Unified mag = Adafruit_HMC5883_Unified(12345);
-
 #define ADAFRUITBLE_REQ 3
 #define ADAFRUITBLE_RDY 2     // This should be an interrupt pin, on Uno thats #2 or #3
 #define ADAFRUITBLE_RST 49
@@ -40,56 +35,44 @@ Adafruit_HMC5883_Unified mag = Adafruit_HMC5883_Unified(12345);
       BTE MOSI  50
       BTE MISO  52
 */
-
 #define STATPIN 9
 //#define PWKPIN 7
 #define TEMPPIN 4
 #define BATTERYREADPIN 3
-
 #define Trig 22
 #define Echo 23
 #define Sonar_Max 200
 
+//Object creation
+Adafruit_HMC5883_Unified mag = Adafruit_HMC5883_Unified(12345);
 NewPing sonar(Trig, Echo, Sonar_Max);
-
-String POSTPASS = "ST2015";
-
-#define SAMPLING_NUMBER 2
-#define SAMPLING_PERIOD 5  //Seconds between samples. 
-
 OneWire oneWire(TEMPPIN);
 DallasTemperature sensors(&oneWire);
 DeviceAddress ourThermometer = {0x28, 0x09, 0x25, 0x50, 0x06, 0x00, 0x00, 0xAB };
-
-//String GETURL = "http://stumpthumpers.comuv.com/tx.php";
-String POSTURL = "http://stumpthumpers.comuv.com/tx.php";
-String READURL = "http://stumpthumpers.comuv.com/destination.php";
-
-//Current lat and long
-//The defined values are dummy values to be used for the purpose of testing the sending of GPS coordinates.
-//String GPSlat_present = "31.123456";
-//String GPSlong_present = "-91.123456";
-String GPSlat_target = "20.2000";
-String GPSlong_target = "-90.1010";
-
 TinyGPSPlus gps;
 SoftwareSerial ss(rxPin,txPin);
+Adafruit_BLE_UART uart = Adafruit_BLE_UART(ADAFRUITBLE_REQ, ADAFRUITBLE_RDY, ADAFRUITBLE_RST);
 
-long startTime;
+//GSM Variables
+#define SAMPLING_NUMBER 2
+#define SAMPLING_PERIOD 5  //Seconds between samples. 
+String POSTPASS = "ST2015";
+String POSTURL = "http://stumpthumpers.comuv.com/tx.php";
+String READURL = "http://stumpthumpers.comuv.com/destination.php";
+String GPSlat_target = "20.2000";
+String GPSlong_target = "-90.1010";
+long startTime;          //Timer to be used in issueCommand2()
 long durationTime = 3000;
 long currentTime;
-
-long startTime_read;
+long startTime_read;     //Timer to be used for periodically sending reads
 long durationTime_read = 60000; //in ms
-
 boolean flag_there = false;
-boolean data_sent = false;
+//boolean data_sent = false;
 boolean flag_cmd = false;
 boolean flag_targetChange = false;
-
 int samplesTaken = 0;
 
-//For GPS
+//GPS Variables
 //gps points 
 double dLat;
 double dLng;
@@ -108,29 +91,20 @@ static const uint32_t dummyCourse = 90;
 double dummyDestLat = 31.3412;
 double dummyDestLong = -91.3412;
 
-//for servo
-float angle;
-
 int isVal = 0; 
-int loc; 
-String outCom; 
-boolean communication; 
+//int loc; 
+//String outCom; 
+//boolean communication; 
 
 // for parsing incoming transmission - doesn't have to be global
-int leftPoint; 
-int rightPoint;
-String out = "";
-String lat;
-String lng; 
-//hack to try and make my serial input work 
-//int tmpleftPoint; 
-//int tmprightPoint;
-//String tmpout = "";
+//int leftPoint; 
+//int rightPoint;
+//String out = "";
+//String lat;
+//String lng; 
 boolean dummySet = false;
 String tmplat;
 String tmplng; 
-
-//GPS Variables
 #define MAX_DISTANCE 1000  //(m) Max distance to allow the device to travel
 #define DISTANCE_ACCURACY 20   //(m) How far we want to be from the destination 
 float distanceFrom = 0;     //(m) How far we are from the destination
@@ -138,10 +112,10 @@ float distanceFrom = 0;     //(m) How far we are from the destination
 //Bluetooth variables
 String bteLat = "";
 String bteLng = "";
-//Adafruit_BLE_UART BTLEserial = Adafruit_BLE_UART(ADAFRUITBLE_REQ, ADAFRUITBLE_RDY, ADAFRUITBLE_RST);
-Adafruit_BLE_UART uart = Adafruit_BLE_UART(ADAFRUITBLE_REQ, ADAFRUITBLE_RDY, ADAFRUITBLE_RST);
+aci_evt_opcode_t laststatus = ACI_EVT_DISCONNECTED;
 
 //Servo Variables
+float angle;
 int SERVO_MIN = 65;    //Limits (in degrees)
 int SERVO_MAX = 140;
 
@@ -156,26 +130,19 @@ int STATUS_SONAR = 1;
 int STATUS_OBJ = 0;
 
 void setup() {
-  // put your setup code here, to run once:
-  
   Serial.begin(115200);
-  //Serial.println("Arduino serial initialized!");
   delay(10);
 
   Serial2.begin(9600);
-  //Serial.println("GSM serial initialized!");
   delay(10);
 
   ss.begin(9600);
-  //Serial.println("GPS serial intialized!");
   delay(10);
   
   sensors.begin();
   sensors.setResolution(ourThermometer, 10);
   
   Wire.begin();
-  //Wire.onReceive(receiveEvent);
-  //Wire.onRequest(requestEvent);
   uart.setRXcallback(rxCallback);
   uart.setACIcallback(aciCallback);
   uart.begin();
@@ -186,28 +153,6 @@ void setup() {
   compass_x_offset = -274.10;
   compass_y_offset = 85.29;
   compass_z_offset = 1252.43;
-  
-  //compass_init(2);
-  //compass_debug = 1;
-  //compass_offset_calibration(3);
-
-}
-aci_evt_opcode_t laststatus = ACI_EVT_DISCONNECTED;
-
-void displaySensorDetails(void)
-{
-  sensor_t sensor;
-  mag.getSensor(&sensor);
-  Serial.println("------------------------------------");
-  Serial.print  ("Sensor:       "); Serial.println(sensor.name);
-  Serial.print  ("Driver Ver:   "); Serial.println(sensor.version);
-  Serial.print  ("Unique ID:    "); Serial.println(sensor.sensor_id);
-  Serial.print  ("Max Value:    "); Serial.print(sensor.max_value); Serial.println(" uT");
-  Serial.print  ("Min Value:    "); Serial.print(sensor.min_value); Serial.println(" uT");
-  Serial.print  ("Resolution:   "); Serial.print(sensor.resolution); Serial.println(" uT");  
-  Serial.println("------------------------------------");
-  Serial.println("");
-  delay(500);
 }
 
 void loop() {
@@ -218,19 +163,11 @@ void loop() {
   //Set up the Temperature sensor and GSM modem.
   uart.pollACI();
   //Setup devices
-  while(true)
-    {
-      Serial.print("In: "); Serial.println(sendSonar());
-    }
-  
   setupTemp();
   setupCompass();
   checkSlave(ADR_UNO, false);    //Check if Uno is connected.
   setupGPS(2, 20);
   setupModem();
-  
-  //dLat = 30.410316;
-  //dLng = -91.180486;
   
   //Execute a read to get the target location
   Serial.println("READ WEBSITE TO GET NEW TARGET COORDINATES");
@@ -296,7 +233,6 @@ void loop() {
       }
       else{
         uart.pollACI();
-        //pingSONAR();
         
         //Get our heading
         if (STATUS_COMPASS == 1)
@@ -436,43 +372,6 @@ void readResponse() {
   }
 }
 
-
-/*
-DEPRECATED
-
-Sends an HTTP GET request to the website. The url for the form is defined by GETURL
-The final url to be used will be:
-GETURL?tmp=TEMPVALUE&lat=LATVALUE&long=LONGVALUE
-The TEMPVALUE is obtained within the function. The current GPS Coordinates are stored in 
-the global variables, GPSlat_present and GPSlong_present
-
-result is the url to be supplied to the Quectel M95 after sending the AT+QHTTPURL=n,m command where n is the size (in bytes) of result
-resultInfop is the pointer that points to the string/char array of the AT+QHTTPURL command and resultp is the pointer for result.
-
-void sendGet() {
-  //Create the URL to send the HTTP GET request to.
-  String result = GETURL + "?tmp=" + String(getTemperature(ourThermometer)) + "&lat=" + GPSlat_present + "&long=" + GPSlong_present + "&pw=" + POSTPASS;
-  //Prepare the AT command that declares the amount of bytes of the url to send the request to and the max time to send (in seconds)
-  String resultInfo = "AT+QHTTPURL=" + String(result.length()) + ",30";
-  //Convert the two above strings to const char *, which is what the issueCommand function requires
-  const char * resultp = result.c_str();
-  const char * resultInfop = resultInfo.c_str();
-  
-  //Issue the AT commands
-  issueCommand("AT+QIFGCNT=0");
-  issueCommand("AT+QIDNSIP=1");
-  issueCommand("AT+QICSGP=1,\"truphone.com\",\"\",\"\""); //Set the APN
-  
-  issueCommand(resultInfop);
-  issueCommand(resultp);
-  issueCommand2("AT+QHTTPGET=60","OK");
-  //delay(5000);
-  issueCommand("AT+QHTTPREAD=30");  //Send the read request. Not currently in use.  
-  delay(2000);
-  issueCommand("AT+QIDEACT");
-  
-}
-*/
 /*
 Sends an HTTP POST request to the website. The url for the form is defined by POSTURL. (Which is currently the same as GETURL
 The TEMPVALUE is obtained within the function (like with sendGet(), using getTemperature)
@@ -608,10 +507,6 @@ float getTemperature(DeviceAddress deviceAddress)
       delay(300);
       tempC = sensors.getTempC(deviceAddress);
     }
-  //if (tempC == -127.00){
-  //Serial.print("Error getting Temperature.");
-  //tempC = -999;
-  //}
   return tempC;
 }
  
@@ -718,42 +613,6 @@ void sendToUno(int a) {
    }
 }
 
-void requestToUno(int a, int b) {
-   /*
-   Currently Unused -- no need to request any information from the Uno
-  boolean printCheck = false;
-  String output, output_piece;
-  int flag1, flag2, flag3, flag4, flag5;
-  Wire.requestFrom(a,b);
-  while (Wire.available() > 1) {
-    char c = Wire.read();
-      if (c != '\n' && c != '\r' && c != '\n\r' && c != '\r\n' && c != 'ÿ' && c != 0 && c != ' ')
-        {
-        output = output + String(c);
-        printCheck = true;
-        Serial.print(c);
-        }
-  }
-  if (printCheck == true)
-    {
-      Serial.println();
-      //Parse Info from Uno
-        //Get the Flag Data
-        flag1 = (output.substring(0,1)).toInt();
-        flag2 = (output.substring(1,2)).toInt();
-        flag3 = (output.substring(2,3)).toInt();
-        flag4 = (output.substring(3,4)).toInt();
-        flag_there = (output.substring(4,5)).toInt();
-        GPSlat_present = output.substring(output.indexOf(',')+1,output.lastIndexOf(','));
-        GPSlong_present = output.substring(output.lastIndexOf(',')+1, output.length());
-        //output_piece = output.substring(0,output.indexOf(','));
-        Serial.println("Flag Received: " + String(flag1) + ", " + String(flag2) + ", " + String(flag3) + ", " + String(flag4) + ", " + String(flag_there));
-        Serial.println("Lat Present: " + GPSlat_present);
-        Serial.println("Long present: " + GPSlong_present);
-    }
-    */
-}
-
 /*
     END OF I2C-SPECIFIC FUNCTIONS
 */
@@ -764,8 +623,6 @@ void requestToUno(int a, int b) {
 
 void setDummys(){
   String tmpout = "";
-  //String tmplat = "";
-  //String tmplng = "";
   int tmpLeftPoint, tmpRightPoint;
   char c;
   while (tmplat.equals(""))
@@ -773,11 +630,9 @@ void setDummys(){
   while (Serial.available() > 0) 
     {  
     c = Serial.read(); 
-    //Serial.write(c); 
     if (c != '\n' && c != '\r' && c != '\n\r' && c != '\r\n' && c != 0)
       {
         tmpout = tmpout + String(c);
-        //Serial.write(c);
       }
      }
    
@@ -788,14 +643,11 @@ void setDummys(){
        if (tmpRightPoint > tmpLeftPoint)
          {
          tmpout = tmpout.substring(tmpLeftPoint+1,tmpRightPoint); 
-         //Serial.println("Should have no <>'s: " + tmpout);
          tmpLeftPoint = tmpout.indexOf(',');
            if (tmpLeftPoint > 0)
              {
              tmplat = tmpout.substring(0,tmpLeftPoint);
              tmplng = tmpout.substring(tmpLeftPoint+1, tmpout.length());
-             //Serial.println("Lat: " + tmplat);
-             //Serial.println("Long: " + tmplng);
              dummyLat = tmplat.toFloat();
              dummyLong = tmplng.toFloat();
                  
@@ -859,9 +711,10 @@ void setPoints(){
     cCourse = dummyCourse; 
   }*/
  // Set current Heading using Compass and print
- cCourse = getHeading();
- Serial.print("Heading: ");
- Serial.println(cCourse);
+ // now done in the calculateServo function
+ //cCourse = getHeading();
+ //Serial.print("Heading: ");
+ //Serial.println(cCourse);
 
  // Set destination points
   /* 
@@ -1155,67 +1008,15 @@ void setupCompass() {
    STATUS_COMPASS = 1;
    Serial.println("Compass Found");
    blueOut("Compass Found.");
-   displaySensorDetails();
    delay(500); 
 }
 
 /*
     END OF COMPASS-SPECIFIC FUNCTIONS
 */
-//void bluetooth(){
-//    // Tell the nRF8001 to do whatever it should be working on.
-//    Serial.print("In bluetooth Module");
-//  BTLEserial.pollACI();
-//
-//  // Ask what is our current status
-//  aci_evt_opcode_t status = BTLEserial.getState();
-//  // If the status changed....
-//  if (status != laststatus) {
-//    // print it out!
-//    if (status == ACI_EVT_DEVICE_STARTED) {
-//        Serial.println(F("* Advertising started"));
-//    }
-//    if (status == ACI_EVT_CONNECTED) {
-//        Serial.println(F("* Connected!"));
-//    }
-//    if (status == ACI_EVT_DISCONNECTED) {
-//        Serial.println(F("* Disconnected or advertising timed out"));
-//    }
-//    // OK set the last status change to this one
-//    laststatus = status;
-//  }
-//
-//  if (status == ACI_EVT_CONNECTED) {
-//    // Lets see if there's any data for us!
-//    if (BTLEserial.available()) {
-//      Serial.print("* "); Serial.print(BTLEserial.available()); Serial.println(F(" bytes available from BTLE"));
-//    }
-//    // OK while we still have something to read, get a character and print it out
-//    while (BTLEserial.available()) {
-//      char c = BTLEserial.read();
-//      Serial.print(c);
-//    }
-//
-//    // Next up, see if we have any data to get from the Serial console
-//
-//    if (Serial.available()) {
-//      // Read a line from Serial
-//      Serial.setTimeout(100); // 100 millisecond timeout
-//      String s = Serial.readString();
-//
-//      // We need to convert the line to bytes, no more than 20 at this time
-//      uint8_t sendbuffer[20];
-//      s.getBytes(sendbuffer, 20);
-//      char sendbuffersize = min(20, s.length());
-//
-//      Serial.print(F("\n* Sending -> \"")); Serial.print((char *)sendbuffer); Serial.println("\"");
-//
-//      // write the data
-//      BTLEserial.write(sendbuffer, sendbuffersize);
-//    }
-//  }
-//   
-//}
+/*
+    END OF BLUETOOTH-SPECIFIC FUNCTIONS
+*/
 void aciCallback(aci_evt_opcode_t event)
 {
   switch(event)
@@ -1301,64 +1102,13 @@ void blueOut(String s) {
   uart.print(s);   
 }
 
-
+/*
+    END OF BLUETOOTH-Specific FUNCTIONS
+*/
 /*
     START OF SONAR-Specific FUNCTIONS
 */
 
-//Function to convert microseconds into inches
-/*
-long microsecondsToInches(long microseconds)
- {
- return microseconds / 74 / 2;
- }
-*/
-/*
-void pingSONAR() {
-   uart.pollACI();
-   pinMode(Trig, OUTPUT); //digital output
-   digitalWrite(Trig, LOW);
-   delayMicroseconds(2);  //clean-up the pulse
-   digitalWrite(Trig, HIGH);
-   delayMicroseconds(5);  // actual PING
-   digitalWrite(Trig, LOW);
-  
-   // The same pin is used to read the signal from the PING: a HIGH
-   // pulse whose duration is the time (in microseconds) from the sending
-   // of the ping to the reception of its echo off of an object.
-   pinMode(Echo,INPUT);
-   duration = pulseIn(Echo, HIGH); //get the echo/return of sound
-  
-   //Used to convert the return time of the echo into a distance
-   in = microsecondsToInches(duration);
-   Serial.println(in);
-  if (in <=120)
-  {
-    if (STATUS_OBJ == 0)
-      {
-        STATUS_OBJ = 1;
-        blueOut("Object ahead!" + String(in) + " in!");
-      }
-     else
-      {
-        STATUS_OBJ = 1; 
-      }
-  }
-  else
-  {
-    if (STATUS_OBJ == 1)
-      {
-        STATUS_OBJ = 0;
-        blueOut("Object moved!"); 
-      }
-     else
-      {
-       STATUS_OBJ = 0; 
-      }
-  }
-
-}
-*/
 int sendSonar() {
  delay(50);
  int cm = sonar.ping_cm(); //actually in cm

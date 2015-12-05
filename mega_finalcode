@@ -3,11 +3,11 @@ This is the integrated code for the Mega for our sensior design
 project. The Mega is interfaced with the GSM, GPS, temperature, 
 compass, Bluetooth and Uno.
 
-Version 1.33
-11/29/2015
+Version 1.35
+12/04/2015
 Latest Changes: 
-Full-system testing.
-
+Sonar module connected and working. Need to finish integration.
+NewPing added and should be done working (no evasive manuevers).
 */
 #include <SPI.h>
 #include "Adafruit_BLE_UART.h"
@@ -21,6 +21,8 @@ Full-system testing.
 #include <Adafruit_Sensor.h>
 #include <Adafruit_HMC5883_U.h>
 #include "compass.h"
+#include <NewPing.h>
+
 
 #define Task_t 10
 int dt=0;
@@ -42,7 +44,13 @@ Adafruit_HMC5883_Unified mag = Adafruit_HMC5883_Unified(12345);
 #define STATPIN 9
 //#define PWKPIN 7
 #define TEMPPIN 4
-#define BATTERYREADPIN 3;
+#define BATTERYREADPIN 3
+
+#define Trig 22
+#define Echo 23
+#define Sonar_Max 200
+
+NewPing sonar(Trig, Echo, Sonar_Max);
 
 String POSTPASS = "ST2015";
 
@@ -144,6 +152,8 @@ int STATUS_TEMP = 0;
 int STATUS_GPS = 0;
 int STATUS_COMPASS = 0;
 int STATUS_UNO = 0;
+int STATUS_SONAR = 1;
+int STATUS_OBJ = 0;
 
 void setup() {
   // put your setup code here, to run once:
@@ -155,7 +165,7 @@ void setup() {
   Serial2.begin(9600);
   //Serial.println("GSM serial initialized!");
   delay(10);
-  
+
   ss.begin(9600);
   //Serial.println("GPS serial intialized!");
   delay(10);
@@ -206,17 +216,19 @@ void loop() {
   //Serial.print("Batter: " );
   //Serial.println(batteryRead * (0.0049) * 11);
   //Set up the Temperature sensor and GSM modem.
-  //t = millis();
-  //compass_scalled_reading();
-  //compass_heading();
-  
   uart.pollACI();
   //Setup devices
+  while(true)
+    {
+      Serial.print("In: "); Serial.println(sendSonar());
+    }
+  
   setupTemp();
   setupCompass();
   checkSlave(ADR_UNO, false);    //Check if Uno is connected.
   setupGPS(2, 20);
   setupModem();
+  
   //dLat = 30.410316;
   //dLng = -91.180486;
   
@@ -284,11 +296,13 @@ void loop() {
       }
       else{
         uart.pollACI();
+        //pingSONAR();
+        
         //Get our heading
         if (STATUS_COMPASS == 1)
           cCourse = getHeading();
-        //else
-        //  cCourse = gps.course.deg();
+        else
+          cCourse = gps.course.deg();
       
         //Calculate the servo angle
         calculateServo();
@@ -881,8 +895,10 @@ void updateDistance() {
 void calculateServo(){
   uart.pollACI();
   float pAngle = angle;
- //initial caclculations
   
+  collisionCheck();
+  
+ //initial caclculations
  double rad=3.14/180;
  int theta=round(atan(deltaLng/deltaLat)/rad);
 
@@ -1283,4 +1299,96 @@ void formatBteResponse(String s) {
 void blueOut(String s) {
   uart.pollACI();
   uart.print(s);   
+}
+
+
+/*
+    START OF SONAR-Specific FUNCTIONS
+*/
+
+//Function to convert microseconds into inches
+/*
+long microsecondsToInches(long microseconds)
+ {
+ return microseconds / 74 / 2;
+ }
+*/
+/*
+void pingSONAR() {
+   uart.pollACI();
+   pinMode(Trig, OUTPUT); //digital output
+   digitalWrite(Trig, LOW);
+   delayMicroseconds(2);  //clean-up the pulse
+   digitalWrite(Trig, HIGH);
+   delayMicroseconds(5);  // actual PING
+   digitalWrite(Trig, LOW);
+  
+   // The same pin is used to read the signal from the PING: a HIGH
+   // pulse whose duration is the time (in microseconds) from the sending
+   // of the ping to the reception of its echo off of an object.
+   pinMode(Echo,INPUT);
+   duration = pulseIn(Echo, HIGH); //get the echo/return of sound
+  
+   //Used to convert the return time of the echo into a distance
+   in = microsecondsToInches(duration);
+   Serial.println(in);
+  if (in <=120)
+  {
+    if (STATUS_OBJ == 0)
+      {
+        STATUS_OBJ = 1;
+        blueOut("Object ahead!" + String(in) + " in!");
+      }
+     else
+      {
+        STATUS_OBJ = 1; 
+      }
+  }
+  else
+  {
+    if (STATUS_OBJ == 1)
+      {
+        STATUS_OBJ = 0;
+        blueOut("Object moved!"); 
+      }
+     else
+      {
+       STATUS_OBJ = 0; 
+      }
+  }
+
+}
+*/
+int sendSonar() {
+ delay(50);
+ int cm = sonar.ping_cm(); //actually in cm
+ return cm;
+}
+
+boolean collisionCheck() {
+ int cm = sendSonar();
+ if (cm > 0)
+  {
+    if (STATUS_OBJ == 0)
+      {
+        STATUS_OBJ = 1;
+        blueOut("Object ahead!" + String(cm) + " cm!");
+      }
+     else
+      {
+        STATUS_OBJ = 1; 
+      }
+  }
+  else
+  {
+    if (STATUS_OBJ == 1)
+      {
+        STATUS_OBJ = 0;
+        blueOut("Object moved!"); 
+      }
+     else
+      {
+       STATUS_OBJ = 0; 
+      }
+  }
 }

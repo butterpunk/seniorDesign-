@@ -3,9 +3,11 @@ This is the integrated code for the Mega for our sensior design
 project. The Mega is interfaced with the GSM, GPS, temperature, 
 compass, Bluetooth and Uno.
 
-Version 1.37.2
+Version 1.37.3
 12/06/2015
 Latest Changes:
+1.37.3
+Added flag_cmd func to issueCommand3.
 1.37.2
 issueCommand3 hotfix
 Commented out setupModem before sending samples.
@@ -366,6 +368,8 @@ String issueCommand3(const char* msg, const char* resp, long t) {
     //If correct
     if (check == true)
       {
+       CMD_TRIES = 0;  //Reset CMD_TRIES
+       flag_cmd = false;
        break; 
       }
   }
@@ -373,6 +377,7 @@ String issueCommand3(const char* msg, const char* resp, long t) {
   if (check == false)
     {
      Serial.println("Tried max attempts."); 
+     flag_cmd = true;
      CMD_TRIES = 0;
     }
 }

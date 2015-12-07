@@ -3,9 +3,11 @@ This is the integrated code for the Mega for our sensior design
 project. The Mega is interfaced with the GSM, GPS, temperature, 
 compass, Bluetooth and Uno.
 
-Version 1.37.3
+Version 1.37.4
 12/06/2015
 Latest Changes:
+1.37.4
+Added temperature sensor back to the sendGet() function.
 1.37.3
 Added flag_cmd func to issueCommand3.
 1.37.2
@@ -511,7 +513,7 @@ void sendGet() {
   //Create the URL to send the HTTP GET request to.
   String result = POSTURL;
   result = "AT+HTTPPARA=\"URL\",\"" + result + "?tmp=";
-  result = result + "23";//String(getTemperature(ourThermometer));
+  result = result + String(getTemperature(ourThermometer));
   result = result + "&clat=" + String(cLat,6);
   result = result + "&clong=" + String(cLng,6);
   result = result + "&dlat=" + GPSlat_target;

@@ -3,11 +3,25 @@ This is the integrated code for the Mega for our sensior design
 project. The Mega is interfaced with the GSM, GPS, temperature, 
 compass, Bluetooth and Uno.
 
-Version 1.36
-12/05/2015
-Latest Changes: 
-Cleaned up some deprecated features.
-Still need to do a final test.
+Version 1.37.2
+12/06/2015
+Latest Changes:
+1.37.2
+issueCommand3 hotfix
+Commented out setupModem before sending samples.
+Full system working.
+1.37.1
+BatteryPin variable now in use. Multiple send reads will be sent (at the start) if the resulting dLat is 0.
+
+1.37
+The GSM2 Click failed on 12/05 and seemed unrepairable.
+It's been replaced with a Seeedstudio GPRS Shield.
+It sends data via get (Couldn't get HTTP POST to work quickly enough)
+and is still able to receive destination coordinates from website.
+It also works off of hardware serial but the baud rate is higher than the click's.
+issueCommand3() was added as a new and improved issueCommand2 that
+can handle the new AT commands well. It also incorporates issueAndSave into its design.
+
 */
 
 //Include libraries
@@ -31,14 +45,10 @@ Still need to do a final test.
 #define ADAFRUITBLE_REQ 3
 #define ADAFRUITBLE_RDY 2     // This should be an interrupt pin, on Uno thats #2 or #3
 #define ADAFRUITBLE_RST 49
-/*
-      BTE MOSI  50
-      BTE MISO  52
-*/
+
 #define STATPIN 9
-//#define PWKPIN 7
 #define TEMPPIN 4
-#define BATTERYREADPIN 3
+#define BATTERYREADPIN 4
 #define Trig 22
 #define Echo 23
 #define Sonar_Max 200
@@ -56,6 +66,8 @@ Adafruit_BLE_UART uart = Adafruit_BLE_UART(ADAFRUITBLE_REQ, ADAFRUITBLE_RDY, ADA
 //GSM Variables
 #define SAMPLING_NUMBER 2
 #define SAMPLING_PERIOD 5  //Seconds between samples. 
+#define MAX_ATTEMPTS 10    //Max amount of attempts to make when issuing commands
+int CMD_TRIES = 0;
 String POSTPASS = "ST2015";
 String POSTURL = "http://stumpthumpers.comuv.com/tx.php";
 String READURL = "http://stumpthumpers.comuv.com/destination.php";
@@ -130,12 +142,17 @@ int STATUS_SONAR = 1;
 int STATUS_OBJ = 0;
 
 void setup() {
+  //Communication with Computer through UART0
   Serial.begin(115200);
   delay(10);
 
-  Serial2.begin(9600);
+  //Communication with GSM through UART2
+  Serial2.begin(19200);
   delay(10);
+  if (digitalRead(STATPIN) == LOW)
+    digitalWrite(STATPIN, HIGH);  //Turn on Modem
 
+  //Communication with GPS through SS
   ss.begin(9600);
   delay(10);
   
@@ -157,22 +174,35 @@ void setup() {
 
 void loop() {
   //delay(500);
-  //float batteryRead = analogRead(A4);
-  //Serial.print("Batter: " );
-  //Serial.println(batteryRead * (0.0049) * 11);
+  float batteryRead = analogRead(BATTERYREADPIN);
+  batteryRead = batteryRead * (0.0049) * 11;
   //Set up the Temperature sensor and GSM modem.
   uart.pollACI();
   //Setup devices
+  blueOut("Blvl: " + String(batteryRead));
   setupTemp();
   setupCompass();
   checkSlave(ADR_UNO, false);    //Check if Uno is connected.
   setupGPS(2, 20);
+  Serial.println("Setting up modem:");
   setupModem();
   
   //Execute a read to get the target location
   Serial.println("READ WEBSITE TO GET NEW TARGET COORDINATES");
   blueOut("Getting dest. data");
-  sendRead();
+  //issueCommand3("AT","OK",5000);
+  //issueCommand3("AT+CSTT=\"truphone.com\",\"\",\"\"","OK",5000);
+  while(dLat == 0)
+    {
+    sendRead();
+    if (dLat == 0)
+      {
+       uart.pollACI();
+       blueOut("Error getting a dest.");
+       blueOut("Trying again ..."); 
+      }
+     delay(500);
+    }
   blueOut("Got dest. data");  
   delay(1000);
   startTime_read = millis();
@@ -196,14 +226,14 @@ void loop() {
            //Send Samples
            if (samplesTaken == 0)
              {
-              blueOut("Sending Samples");    
+              blueOut("Sending Samples"); 
+              //setupModem(); //May need a better check  
               for (int k=0; k<SAMPLING_NUMBER; k++)
                 {
                     uart.pollACI();
                     Serial.println("SENDING SAMPLE " + String(k));
-                    setupModem();
                     blueOut("Sending sample " + String(k+1));
-                    sendPost();
+                    sendGet();
                     samplesTaken++;
                       if (k < SAMPLING_NUMBER-1)
                         delay(SAMPLING_PERIOD*1000);  //Wait sampling period.
@@ -288,6 +318,65 @@ void issueCommand(const char* msg) {
   delay(500);
 }
 
+String issueCommand3(const char* msg, const char* resp, long t) {
+  //msg is the command to send
+  //resp is the desired response
+  //t is the timeout (ms)
+  uart.pollACI();
+  Serial2.flush();        //Wait for outgoing serial data to finish
+  long tB = millis() + t;
+  String out = "";
+  int test;
+  boolean check = false;
+  boolean tried = false;
+  char in_c;
+  //Try only a limited number of commands
+  while(CMD_TRIES <= MAX_ATTEMPTS)
+  {
+    //Send command
+    Serial2.println(msg);
+    //Wait t for ideal response
+  while(millis() < tB)
+    {
+    uart.pollACI();
+    delay(500);
+    while (Serial2.available()){
+        in_c = Serial2.read();
+        Serial.write(in_c);
+        out = out + String(in_c);
+        delay(10);
+      }
+    test = out.indexOf(resp);
+    if (test >= 0)
+      {
+       //Found the intended response.
+       check = true;
+       return out;
+       break; 
+      }
+    }
+    //Waited t. Try again
+    if (check == false)
+     {
+      delay(500);
+      CMD_TRIES += 1;
+      Serial.println("Try again");
+      tB = tB + t;
+     }
+    //If correct
+    if (check == true)
+      {
+       break; 
+      }
+  }
+  //No more tries
+  if (check == false)
+    {
+     Serial.println("Tried max attempts."); 
+     CMD_TRIES = 0;
+    }
+}
+  
 void issueCommand2(const char* msg, const char* resp) {
   String checkFor = resp;
   int checkForLength = checkFor.length();
@@ -380,6 +469,7 @@ Lat and Long are saved within the global variables.
 result is the url to be supplied to AT+QHTTPURL=n,m where n is the size (in bytes) of result
 
 */
+/*
 void sendPost() {
   uart.pollACI();
   String result = POSTURL;  
@@ -406,9 +496,34 @@ void sendPost() {
   issueCommand(resultp);
   issueCommand2(postInfop,"CONNECT");
   issueCommand2(dataToSendp,"OK");
-  issueCommand("AT+QHTTPREAD=30"); //Send the read request. Not currently in use. 
+  //issueCommand("AT+QHTTPREAD=30"); //Send the read request. Not currently in use. 
   issueCommand("AT+QIDEACT");
   
+}
+*/
+void sendGet() {
+  uart.pollACI();
+  //Create the URL to send the HTTP GET request to.
+  String result = POSTURL;
+  result = "AT+HTTPPARA=\"URL\",\"" + result + "?tmp=";
+  result = result + "23";//String(getTemperature(ourThermometer));
+  result = result + "&clat=" + String(cLat,6);
+  result = result + "&clong=" + String(cLng,6);
+  result = result + "&dlat=" + GPSlat_target;
+  result = result + "&dlong=" + GPSlong_target;
+  result = result + "&pw=" + POSTPASS + "\"";
+  const char * resultp = result.c_str();
+  issueCommand3("AT+HTTPINIT","OK",5000);
+  issueCommand(resultp);
+  //delay(2000);
+  issueCommand3("AT+HTTPACTION=0","HTTPACTION:0,200",10000);  //Send Get
+  issueCommand("AT+HTTPREAD");
+  //String result2 = "AT+HTTPPARA=\"URL\",\"" + POSTURL + "\"";
+  //const char * result2tp = result2.c_str();
+  //issueCommand(result2tp);
+  //issueCommand3("AT+HTTPACTION=0","HTTPACTION:0,200",5000);  //Send Get
+  //issueCommand("AT+HTTPREAD");
+  issueCommand("AT+HTTPTERM");
 }
 
 void sendRead() {
@@ -417,10 +532,9 @@ void sendRead() {
   String result = READURL;
   String result2;
   //Prepare the AT command that declares the amount of bytes of the url to send the request to and the max time to send (in seconds)
-  String resultInfo = "AT+QHTTPURL=" + String(result.length()) + ",30";
-  //Convert the two above strings to const char *, which is what the issueCommand function requires
+  result = "AT+HTTPPARA=\"URL\",\"" + result + "\"";
+  //Convert the above string to const char *, which is what the issueCommand function requires
   const char * resultp = result.c_str();
-  const char * resultInfop = resultInfo.c_str();
   
   String output;
   //char outChar[ ];
@@ -429,24 +543,22 @@ void sendRead() {
   int leftPoint = 0;
   int rightPoint = 0;
   
-  //Issue the AT commands
-  issueCommand("AT+QIFGCNT=0");
-  issueCommand("AT+QIDNSIP=1");
-  issueCommand("AT+QICSGP=1,\"truphone.com\",\"\",\"\""); //Set the APN
-  
-  issueCommand(resultInfop);
+  //Issue the AT commands to start HTTP
+  issueCommand3("AT+HTTPINIT","OK",5000);
   issueCommand(resultp);
-  issueCommand2("AT+QHTTPGET=60","OK");
-  output = issueAndSave("AT+QHTTPREAD=30");  //Send the read request.
+  delay(2000);
+  issueCommand3("AT+HTTPACTION=0","HTTPACTION:0,200",10000);  //Send Get
+  output = issueCommand3("AT+HTTPREAD","]",10000);  //Send the read request.
   leftPoint = output.indexOf('[');
-  rightPoint = output.indexOf(']', leftPoint + 1);
+  rightPoint = output.indexOf(']');
   if (leftPoint != rightPoint && rightPoint > leftPoint)
     {
     output = output.substring(leftPoint+1,rightPoint);
     leftPoint = output.indexOf(',');    // Is now a middle point
     result = output.substring(0,leftPoint);
     result2 = output.substring(leftPoint+1, output.length());
-    Serial.println(result);
+    //Serial.println("R: " + result);
+    //Serial.println("R2: " + result2);
     if (result.equals(GPSlat_target) && result2.equals(GPSlong_target))
       {
         //No change to the target location
@@ -468,23 +580,33 @@ void sendRead() {
       }
     }
   //delay(5000);
-  issueCommand2("AT+QIDEACT","DEACT OK");
+  issueCommand("AT+HTTPTERM");
    
 }
 
 void setupModem() {
- issueCommand2("AT","OK");
+ delay(7000);
+ Serial2.flush();
+ Serial.flush();
+ issueCommand3("AT","OK",2000);
  while (flag_cmd)
   {
     //Modem not communicating properly, try again
-    issueCommand2("AT","OK");
+    issueCommand3("AT","OK",2000);
     blueOut("Check Modem wiring.");
     STATUS_GSM = 0;
     delay(500);
   }
   STATUS_GSM = 1;
-  String csq = getSignalStrength("AT+CSQ");
   Serial.println("Modem and Mega communication established.");
+  //Issue the AT commands to connect to service
+  issueCommand3("AT+CSTT=\"truphone.com\",\"\",\"\"","OK",5000);
+  issueCommand3("AT+SAPBR=3,1,\"APN\",\"truphone.com\"","OK",5000);
+  issueCommand3("AT+SAPBR=3,1,\"USER\",\"\"","OK",5000);
+  issueCommand3("AT+SAPBR=3,1,\"PWD\",\"\"","OK",5000);
+  delay(3000);
+  issueCommand3("AT+SAPBR=1,1","OK",5000);
+  String csq = getSignalStrength("AT+CSQ");
   blueOut("Modem on, SQ: " + csq);
 }
 
@@ -1112,6 +1234,7 @@ void blueOut(String s) {
 int sendSonar() {
  delay(50);
  int cm = sonar.ping_cm(); //actually in cm
+ Serial.println("Cm: " + String(cm));
  return cm;
 }
 

@@ -3,9 +3,11 @@ This is the integrated code for the Mega for our sensior design
 project. The Mega is interfaced with the GSM, GPS, temperature, 
 compass, Bluetooth and Uno.
 
-Version 1.37.4
+Version 1.37.5
 12/06/2015
 Latest Changes:
+1.37.5
+Removed some unneeded comments.
 1.37.4
 Added temperature sensor back to the sendGet() function.
 1.37.3
@@ -89,7 +91,6 @@ boolean flag_targetChange = false;
 int samplesTaken = 0;
 
 //GPS Variables
-//gps points 
 double dLat;
 double dLng;
 double cLat; 
@@ -108,16 +109,7 @@ double dummyDestLat = 31.3412;
 double dummyDestLong = -91.3412;
 
 int isVal = 0; 
-//int loc; 
-//String outCom; 
-//boolean communication; 
 
-// for parsing incoming transmission - doesn't have to be global
-//int leftPoint; 
-//int rightPoint;
-//String out = "";
-//String lat;
-//String lng; 
 boolean dummySet = false;
 String tmplat;
 String tmplng; 
@@ -177,7 +169,6 @@ void setup() {
 }
 
 void loop() {
-  //delay(500);
   float batteryRead = analogRead(BATTERYREADPIN);
   batteryRead = batteryRead * (0.0049) * 11;
   //Set up the Temperature sensor and GSM modem.
@@ -194,8 +185,6 @@ void loop() {
   //Execute a read to get the target location
   Serial.println("READ WEBSITE TO GET NEW TARGET COORDINATES");
   blueOut("Getting dest. data");
-  //issueCommand3("AT","OK",5000);
-  //issueCommand3("AT+CSTT=\"truphone.com\",\"\",\"\"","OK",5000);
   while(dLat == 0)
     {
     sendRead();
@@ -217,7 +206,6 @@ void loop() {
       setPoints();
       uart.pollACI();
       updateDistance();
-      //if ( dLat == cLat && dLng == cLng)
       if (distanceFrom <= DISTANCE_ACCURACY)
       {
         uart.pollACI();
@@ -231,7 +219,6 @@ void loop() {
            if (samplesTaken == 0)
              {
               blueOut("Sending Samples"); 
-              //setupModem(); //May need a better check  
               for (int k=0; k<SAMPLING_NUMBER; k++)
                 {
                     uart.pollACI();
@@ -248,9 +235,7 @@ void loop() {
               startTime_read = millis();
               }
             
-            //Serial.println("READING ... ");
             //flag_targetChange is updated by sendRead if the read gps location is new
-            //set up timer so read only happens every n seconds
             if (millis() > startTime_read + durationTime_read)
               {
                 uart.pollACI();
@@ -522,14 +507,8 @@ void sendGet() {
   const char * resultp = result.c_str();
   issueCommand3("AT+HTTPINIT","OK",5000);
   issueCommand(resultp);
-  //delay(2000);
   issueCommand3("AT+HTTPACTION=0","HTTPACTION:0,200",10000);  //Send Get
   issueCommand("AT+HTTPREAD");
-  //String result2 = "AT+HTTPPARA=\"URL\",\"" + POSTURL + "\"";
-  //const char * result2tp = result2.c_str();
-  //issueCommand(result2tp);
-  //issueCommand3("AT+HTTPACTION=0","HTTPACTION:0,200",5000);  //Send Get
-  //issueCommand("AT+HTTPREAD");
   issueCommand("AT+HTTPTERM");
 }
 
@@ -586,7 +565,6 @@ void sendRead() {
         Serial.println("TARGET LOCATION CHANGED: samplesTaken = 0");
       }
     }
-  //delay(5000);
   issueCommand("AT+HTTPTERM");
    
 }
@@ -789,7 +767,7 @@ void setDummys(){
 
 }
 void setPoints(){
-  //// Set current Lat and Lng and print 
+  // Set current Lat and Lng and print 
   if(gps.location.isValid()){
     STATUS_GPS = 1;
     cLat = gps.location.lat();
@@ -799,21 +777,6 @@ void setPoints(){
   }
   else{
   Serial.println("Not Receiving vaild GPS Coordinates. Enter Dummy Variables via Bluetooth:");
-   /*
-   Code to use when setting current coordinates via serial and not bluetooth
-   dummySet = false;
-   tmplat = "";
-   tmplng = "";
-   while(dummySet == false)
-      {
-       setDummys(); 
-      }
-   cLat = tmplat.toFloat();
-   cLng = tmplng.toFloat();
-   Serial.println(cLat,4);
-   Serial.println(cLng,4);  
-   isVal = 0; 
-   */
    STATUS_GPS = 0;
    bteLat = "";
    blueOut("Enter cGPS");
@@ -829,38 +792,7 @@ void setPoints(){
     bteLat = "";
     bteLng = "";
   }
-  //// Set current Heading and print 
-  /*
-  if(gps.course.isValid()){
-    Serial.println("Receiving Vaild GPS Heading..."); 
-    cCourse = gps.course.deg();
-  }
-  else{
-   // Serial.println("Not receiving vaild GPS Heading..Using dummy Heading");
-    cCourse = dummyCourse; 
-  }*/
- // Set current Heading using Compass and print
- // now done in the calculateServo function
- //cCourse = getHeading();
- //Serial.print("Heading: ");
- //Serial.println(cCourse);
-
- // Set destination points
-  /* 
-  No longer receiving dest coordinates via I2C. Deprecated.
-  if(communication == 1){
-   Serial.println("Receiving Valid destination Coordinates");
-   const char * tmpLat = lat.c_str();
-   const char * tmpLng = lng.c_str(); 
-    dLat = lat.toFloat(); 
-    dLng = lng.toFloat(); 
  
-  }
-  else{
-   Serial.println("Not Receiving valid destination Coordinates");
-   dLat = dummyDestLat;
-   dLat = dummyDestLong; 
-  }*/
 deltaLat=dLat-cLat;
 deltaLng=dLng-cLng; 
 }
@@ -916,12 +848,12 @@ if (angle > SERVO_MAX)
   angle = SERVO_MAX;
 if (angle < SERVO_MIN)
   angle = SERVO_MIN;
-//Serial.println("Angle is " + String(angle));
+Serial.println("Angle is " + String(angle));
 updateDistance();
-//Serial.println("cLat is " + String(cLat));
-//Serial.println("cLng is " + String(cLng));
+Serial.println("cLat is " + String(cLat));
+Serial.println("cLng is " + String(cLng));
 Serial.println("Theta is " + String(theta));
-//Serial.println("cLat: " + String(cLat,6) + ", cLng: " + String(cLng,6));
+Serial.println("cLat: " + String(cLat,6) + ", cLng: " + String(cLng,6));
 if (gps.location.isValid())
   {
     Serial.print("cLat: "); printFloat(cLat,gps.location.isValid(), 12, 6);

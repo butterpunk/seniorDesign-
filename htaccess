@@ -1,0 +1,23 @@
+# Do not remove this line, otherwise mod_rewrite rules will stop working
+RewriteBase /
+RewriteEngine On
+RewriteRule ^(home)/$ home.php
+RewriteRule ^(home)$ home.php
+
+
+RewriteRule ^(data)/$ data.php
+RewriteRule ^(data)$ data.php
+
+RewriteRule ^(photos)/$ photos.php
+RewriteRule ^(photos)$ photos.php
+
+RewriteRule ^(dev)/$ dev.php
+RewriteRule ^(dev)$ dev.php
+
+RewriteRule ^(login)/$ login.php
+RewriteRule ^(login)$ login.php
+
+RewriteRule ^(logout)/$ logout.php
+RewriteRule ^(logout)$ logout.php
+
+ErrorDocument 404 http://www.stumpthumpers.comuv.com/404.php

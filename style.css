@@ -1,0 +1,177 @@
+@font-face{
+    font-family: "avenir";
+    src: url('avenir.otf');
+}
+
+#banner {
+width: 95%;
+height: 120px;
+min-width: 100px;
+margin-left: auto;
+margin-right: auto;
+border: 2px solid black;
+font-size: 70px;
+text-align: center;
+text-transform: uppercase;
+background-color: rgb(240,240,240);
+}
+
+#content {
+width: 95%;
+min-width: 50px;
+min-height: 50px;
+margin-top: 10px;
+margin-bottom: 10px;
+margin-left: auto;
+margin-right: auto;
+border: 2px solid black;
+background-color: rgb(240,240,240);
+float: inherit; 
+overflow:hidden;
+}
+
+#footer {
+width: 95%;
+height: 25px;
+margin-left: auto;
+margin-right: auto;
+text-align: center;
+font-size: 10px;
+font-color: rgb(100,100,100);
+display: none;
+}
+
+p {
+width: 95%;
+padding-left: 10px;
+font-size: 14px;
+font-family: verdana;
+}
+
+heading1 {
+padding-left: 20px;
+font-size: 18px;
+font-family: verdana;
+font-type: bold;
+}
+
+.myForm {
+width: 95%;
+margin-left: auto;
+margin-right: auto;
+min-width: 400px;
+}
+
+.input_box {
+width: 150px;
+min-height: 40px;
+max-height: 80px;
+font-size: 12px;
+font-family: verdana;
+background-color: white;
+border: 1px solid black;
+padding: 5px;
+}
+
+.submit_box {
+margin: 10px;
+width: 100px;
+height: 25px;
+font-family: verdana;
+font-size: 14px;
+text-align: center;
+background-color: rgb(230,230,230);
+border: 1px solid black;
+}
+
+.output_box {
+width: 95%;
+margin-left: auto;
+margin-right: auto;
+min-width: 25px;
+min-height: 50px;
+font-size: 12px;
+font-family: verdana;
+background-color: white;
+border: 1px solid black;
+}
+
+table, th, td {
+ /*    border: 1px solid black; */
+    border-collapse: collapse;
+}
+th, td {
+    padding: 15px;
+}
+nav.navbar.navbar-default{
+	margin-bottom: 0px !important;
+	background-color: #eee;
+}
+.jumbotron{
+	padding-top: 16px;
+}
+body{
+	/* background-color: grey; */
+	/* background-image: url("/Cypress-Trees-Pictures-Grey.png"); */
+}
+.table-striped > tbody > tr:nth-of-type(odd){
+	background-color: #DEDEDE;
+}
+#map{
+	height:380px;
+
+}
+a.sidebar{
+	text-align: center;
+	font-family: avenir;
+	color: black !important;
+	font-size: 22px;
+	margin-bottom: 10px;
+	margin-top: 10px;
+}
+.row{
+	margin-bottom: 35px !important;
+	margin-top: 20px !important;
+	text-align: center !important; 
+}
+.missionContainer{
+	background-color: grey;
+	padding-top: 20px;
+	padding-bottom: 20px;
+	padding-left: 10px;
+	padding-right: 10px;
+}
+p{
+	color: white;
+	font-family: avenir,helvetica !important;
+	font-size: 20px;
+	font-weight: 800;
+}
+h1{
+	color: white;
+	font-family: avenir,helvetica !important;
+	font-weight: 800;
+}
+#altText{
+	font-family: avenir,helvetica !important; 
+		font-size: 20px;
+	font-weight: 800;
+	color: black;
+	margin-top: 20px;
+}
+#smallImg{
+	-ms-transform: rotate(90deg); /* IE 9 */
+    -webkit-transform: rotate(90deg); /* Chrome, Safari, Opera */
+    transform: rotate(90deg);
+}
+.mainContainer{
+	margin-top: 30px;
+}
+
+body#home div#homenav,
+body#data div#datanav,
+body#photo div#photonav,
+body#dev div#devnav,
+body#login div#loginnav {
+/*     background: rgb(200,200,200); */
+}
